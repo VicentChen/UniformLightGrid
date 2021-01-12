@@ -29,10 +29,12 @@
 #include "RenderGraph/RenderPassHelpers.h"
 #include "Scene/HitInfo.h"
 #include <sstream>
-
+const int WINDOW_WIDTH = 1920;
+const int WINDOW_HEIGHT = 1080;
 namespace
 {
     const char kShaderFile[] = "RenderPasses/ReSTIR/PathTracer.rt.slang";
+    const char kFinalShader[] = "RenderPasses/ReSTIR/ReSTIRFinal.rt.slang";
     const char kParameterBlockName[] = "gData";
 
     // Ray tracing settings that affect the traversal stack size.
@@ -47,6 +49,13 @@ namespace
     const std::string kColorOutput = "color";
     const std::string kAlbedoOutput = "albedo";
     const std::string kTimeOutput = "time";
+
+    // Internal
+    const std::string kCurrReservoir = "Current Reservoir";
+    const std::string kPrevReservoir = "Previous Reservoir";
+    const std::string kTemporalReservoir = "Temporal Reservoir";
+    const std::string kFinalLightPos = "FinalLightPos";
+    const std::string kFinalLightLi = "FinalLightLi";
 
     const Falcor::ChannelList kOutputChannels =
     {
@@ -77,15 +86,28 @@ ReSTIR::SharedPtr ReSTIR::create(RenderContext* pRenderContext, const Dictionary
 ReSTIR::ReSTIR(const Dictionary& dict)
     : PathTracer(dict, kOutputChannels)
 {
+    mSelectedEmissiveSampler = EmissiveLightSamplerType::Uniform;
     // Create ray tracing program.
-    RtProgram::Desc progDesc;
-    progDesc.addShaderLibrary(kShaderFile).setRayGen("rayGen");
-    progDesc.addHitGroup(kRayTypeScatter, "scatterClosestHit", "scatterAnyHit").addMiss(kRayTypeScatter, "scatterMiss");
-    progDesc.addHitGroup(kRayTypeShadow, "", "shadowAnyHit").addMiss(kRayTypeShadow, "shadowMiss");
-    progDesc.addDefine("MAX_BOUNCES", std::to_string(mSharedParams.maxBounces));
-    progDesc.addDefine("SAMPLES_PER_PIXEL", std::to_string(mSharedParams.samplesPerPixel));
-    progDesc.setMaxTraceRecursionDepth(kMaxRecursionDepth);
-    mTracer.pProgram = RtProgram::create(progDesc, kMaxPayloadSizeBytes, kMaxAttributesSizeBytes);
+    {
+        RtProgram::Desc progDesc;
+        progDesc.addShaderLibrary(kShaderFile).setRayGen("rayGen");
+        progDesc.addHitGroup(kRayTypeScatter, "scatterClosestHit", "scatterAnyHit").addMiss(kRayTypeScatter, "scatterMiss");
+        progDesc.addHitGroup(kRayTypeShadow, "", "shadowAnyHit").addMiss(kRayTypeShadow, "shadowMiss");
+        progDesc.addDefine("MAX_BOUNCES", std::to_string(mSharedParams.maxBounces));
+        progDesc.addDefine("SAMPLES_PER_PIXEL", std::to_string(mSharedParams.samplesPerPixel));
+        progDesc.setMaxTraceRecursionDepth(kMaxRecursionDepth);
+        mTracer.pProgram = RtProgram::create(progDesc, kMaxPayloadSizeBytes, kMaxAttributesSizeBytes);
+    }
+    {
+        RtProgram::Desc progDesc;
+        progDesc.addShaderLibrary(kFinalShader).setRayGen("rayGen");
+        //progDesc.addDefine("MAX_BOUNCES", std::to_string(mSharedParams.maxBounces));
+        //progDesc.addDefine("SAMPLES_PER_PIXEL", std::to_string(mSharedParams.samplesPerPixel));
+        progDesc.setMaxTraceRecursionDepth(kMaxRecursionDepth);
+        m_FinalTracer.pProgram = RtProgram::create(progDesc, kMaxPayloadSizeBytes, kMaxAttributesSizeBytes);
+    }
+
+
 }
 
 void ReSTIR::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)
@@ -95,28 +117,44 @@ void ReSTIR::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pSc
     if (pScene)
     {
         mTracer.pProgram->addDefines(pScene->getSceneDefines());
+        m_FinalTracer.pProgram->addDefines(pScene->getSceneDefines());
     }
 }
 
 void ReSTIR::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
+    Texture::SharedPtr pCurrReservoir = renderData[kCurrReservoir]->asTexture();
+    Texture::SharedPtr pPrevReservoir = renderData[kPrevReservoir]->asTexture();
+    Texture::SharedPtr pTemporalReservoir = renderData[kTemporalReservoir]->asTexture();
+    Texture::SharedPtr pFinalLightPos = renderData[kFinalLightPos]->asTexture();
+    Texture::SharedPtr pFinalLightLi = renderData[kFinalLightLi]->asTexture();
+    Texture::SharedPtr pOutputColor = renderData[kColorOutput]->asTexture();
+
     // Call shared pre-render code.
     if (!beginFrame(pRenderContext, renderData)) return;
 
     // Set compile-time constants.
     RtProgram::SharedPtr pProgram = mTracer.pProgram;
+    RtProgram::SharedPtr pFinalProgram = m_FinalTracer.pProgram;
     setStaticParams(pProgram.get());
+    setStaticParams(pFinalProgram.get());
 
     // For optional I/O resources, set 'is_valid_<name>' defines to inform the program of which ones it can access.
     // TODO: This should be moved to a more general mechanism using Slang.
     pProgram->addDefines(getValidResourceDefines(mInputChannels, renderData));
     pProgram->addDefines(getValidResourceDefines(mOutputChannels, renderData));
+    pFinalProgram->addDefines(getValidResourceDefines(mInputChannels, renderData));
+    pFinalProgram->addDefines(getValidResourceDefines(mOutputChannels, renderData));
 
     if (mUseEmissiveSampler)
     {
         // Specialize program for the current emissive light sampler options.
         assert(mpEmissiveSampler);
-        if (pProgram->addDefines(mpEmissiveSampler->getDefines())) mTracer.pVars = nullptr;
+        if (pProgram->addDefines(mpEmissiveSampler->getDefines()))
+        {
+            mTracer.pVars = nullptr;
+         /*   m_FinalTracer.pVars = nullptr;*/
+        }
     }
 
     // Prepare program vars. This may trigger shader compilation.
@@ -136,9 +174,22 @@ void ReSTIR::execute(RenderContext* pRenderContext, const RenderData& renderData
             pGlobalVars[desc.texname] = renderData[desc.name]->asTexture();
         }
     };
+
     for (auto channel : mInputChannels) bind(channel);
     for (auto channel : mOutputChannels) bind(channel);
 
+    // Bind I/O buffers. These needs to be done per-frame as the buffers may change anytime.
+    auto Finalbind = [&](const ChannelDesc& desc)
+    {
+        if (!desc.texname.empty())
+        {
+            auto pGlobalVars = m_FinalTracer.pVars->getRootVar();
+            pGlobalVars[desc.texname] = renderData[desc.name]->asTexture();
+        }
+    };
+
+    for (auto channel : mInputChannels) Finalbind(channel);
+ 
     // Get dimensions of ray dispatch.
     const uint2 targetDim = renderData.getDefaultTextureDims();
     assert(targetDim.x > 0 && targetDim.y > 0);
@@ -149,43 +200,93 @@ void ReSTIR::execute(RenderContext* pRenderContext, const RenderData& renderData
     // Spawn the rays.
     {
         PROFILE("ReSTIR::execute()_RayTrace");
+
+        mTracer.pVars["ReservoirTemporal"] = pTemporalReservoir;
+        mTracer.pVars["ReservoirCurr"] = pCurrReservoir;
+        mTracer.pVars["ReservoirPrev"] = pPrevReservoir;
+        mTracer.pVars["FinalLightPos"] = pFinalLightPos;
+        mTracer.pVars["FinalLightLi"] = pFinalLightLi;
+        mTracer.pVars["PerFrameCB"]["CandidateCount"] = m_CandidateCount;
+        mTracer.pVars["PerFrameCB"]["ReservoirPerPixel"] = m_ReservoirPerPixel;
+
         mpScene->raytrace(pRenderContext, mTracer.pProgram.get(), mTracer.pVars, uint3(targetDim, 1));
+    }
+
+    {
+        PROFILE("ReSTIR::execute()_RayTrace");
+
+        m_FinalTracer.pVars["ReservoirCurr"] = pCurrReservoir;
+        m_FinalTracer.pVars["ReservoirPrev"] = pPrevReservoir;
+        m_FinalTracer.pVars["FinalLightPos"] = pFinalLightPos;
+        m_FinalTracer.pVars["FinalLightLi"] = pFinalLightLi;
+        m_FinalTracer.pVars["gOutputColor"] = pOutputColor;
+        m_FinalTracer.pVars["PerFrameCB"]["ReservoirPerPixel"] = m_ReservoirPerPixel;
+
+        mpScene->raytrace(pRenderContext, m_FinalTracer.pProgram.get(), m_FinalTracer.pVars, uint3(targetDim, 1));
     }
 
     // Call shared post-render code.
     endFrame(pRenderContext, renderData);
 }
 
+RenderPassReflection ReSTIR::reflect(const CompileData& compileData)
+{
+    auto Reflector = PathTracer::reflect(compileData);
+    Reflector.addInternal(kCurrReservoir, "Current Reservoir").format(ResourceFormat::RGBA32Float).bindFlags(ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess).texture2D(WINDOW_WIDTH, WINDOW_HEIGHT, 1, 1, 8);
+    Reflector.addInternal(kPrevReservoir, "Previous Reservoir").format(ResourceFormat::RGBA32Float).bindFlags(ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess).texture2D(WINDOW_WIDTH, WINDOW_HEIGHT, 1, 1, 8);
+    Reflector.addInternal(kTemporalReservoir, "Temporal Reservoir").format(ResourceFormat::RGBA32Float).bindFlags(ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess).texture2D(WINDOW_WIDTH, WINDOW_HEIGHT, 1, 1, 8);
+    Reflector.addInternal(kFinalLightLi, "Final Light Li").format(ResourceFormat::RGBA32Float).bindFlags(ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess).texture2D(WINDOW_WIDTH, WINDOW_HEIGHT, 1, 1, 8);
+    Reflector.addInternal(kFinalLightPos, "Final Light Pos").format(ResourceFormat::RGBA32Float).bindFlags(ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess).texture2D(WINDOW_WIDTH, WINDOW_HEIGHT, 1, 1, 8);
+
+    return Reflector;
+}
+
 void ReSTIR::prepareVars()
 {
     assert(mpScene);
     assert(mTracer.pProgram);
+    {
+        // Configure program.
+        mTracer.pProgram->addDefines(mpSampleGenerator->getDefines());
 
-    // Configure program.
-    mTracer.pProgram->addDefines(mpSampleGenerator->getDefines());
+        // Create program variables for the current program/scene.
+        // This may trigger shader compilation. If it fails, throw an exception to abort rendering.
+        mTracer.pVars = RtProgramVars::create(mTracer.pProgram, mpScene);
 
-    // Create program variables for the current program/scene.
-    // This may trigger shader compilation. If it fails, throw an exception to abort rendering.
-    mTracer.pVars = RtProgramVars::create(mTracer.pProgram, mpScene);
+        // Bind utility classes into shared data.
+        auto pGlobalVars = mTracer.pVars->getRootVar();
+        bool success = mpSampleGenerator->setShaderData(pGlobalVars);
+        if (!success) throw std::exception("Failed to bind sample generator");
 
-    // Bind utility classes into shared data.
-    auto pGlobalVars = mTracer.pVars->getRootVar();
-    bool success = mpSampleGenerator->setShaderData(pGlobalVars);
-    if (!success) throw std::exception("Failed to bind sample generator");
+        // Create parameter block for shared data.
+        ProgramReflection::SharedConstPtr pReflection = mTracer.pProgram->getReflector();
+        ParameterBlockReflection::SharedConstPtr pBlockReflection = pReflection->getParameterBlock(kParameterBlockName);
+        assert(pBlockReflection);
+        mTracer.pParameterBlock = ParameterBlock::create(pBlockReflection);
+        assert(mTracer.pParameterBlock);
 
-    // Create parameter block for shared data.
-    ProgramReflection::SharedConstPtr pReflection = mTracer.pProgram->getReflector();
-    ParameterBlockReflection::SharedConstPtr pBlockReflection = pReflection->getParameterBlock(kParameterBlockName);
-    assert(pBlockReflection);
-    mTracer.pParameterBlock = ParameterBlock::create(pBlockReflection);
-    assert(mTracer.pParameterBlock);
+        // Bind static resources to the parameter block here. No need to rebind them every frame if they don't change.
+        // Bind the light probe if one is loaded.
+        if (mpEnvMapSampler) mpEnvMapSampler->setShaderData(mTracer.pParameterBlock["envMapSampler"]);
 
-    // Bind static resources to the parameter block here. No need to rebind them every frame if they don't change.
-    // Bind the light probe if one is loaded.
-    if (mpEnvMapSampler) mpEnvMapSampler->setShaderData(mTracer.pParameterBlock["envMapSampler"]);
+        // Bind the parameter block to the global program variables.
+        mTracer.pVars->setParameterBlock(kParameterBlockName, mTracer.pParameterBlock);
+    }
+    {
+        m_FinalTracer.pProgram->addDefines(mpSampleGenerator->getDefines());
+        m_FinalTracer.pVars = RtProgramVars::create(m_FinalTracer.pProgram, mpScene);
 
-    // Bind the parameter block to the global program variables.
-    mTracer.pVars->setParameterBlock(kParameterBlockName, mTracer.pParameterBlock);
+        auto pGlobalVars = m_FinalTracer.pVars->getRootVar();
+        bool success = mpSampleGenerator->setShaderData(pGlobalVars);
+        if (!success) throw std::exception("Failed to bind sample generator");
+
+        //ProgramReflection::SharedConstPtr pReflection = m_FinalTracer.pProgram->getReflector();
+        //ParameterBlockReflection::SharedConstPtr pBlockReflection = pReflection->getParameterBlock(kParameterBlockName);
+        //assert(pBlockReflection);
+        //m_FinalTracer.pParameterBlock = ParameterBlock::create(pBlockReflection);
+        //assert(m_FinalTracer.pParameterBlock);
+        //m_FinalTracer.pVars->setParameterBlock(kParameterBlockName, m_FinalTracer.pParameterBlock);
+    }
 }
 
 void ReSTIR::setTracerData(const RenderData& renderData)
@@ -203,4 +304,14 @@ void ReSTIR::setTracerData(const RenderData& renderData)
         bool success = mpEmissiveSampler->setShaderData(pBlock["emissiveSampler"]);
         if (!success) throw std::exception("Failed to bind emissive light sampler");
     }
+
+    //m_FinalTracer.pParameterBlock["params"].setBlob(mSharedParams);
+}
+
+void ReSTIR::renderUI(Gui::Widgets& widget)
+{
+    widget.var("Candidate Count", m_CandidateCount, 1u, 64u);
+    widget.var("Reservoir Per Pixel", m_ReservoirPerPixel, 1u, 8u);
+
+    PathTracer::renderUI(widget);
 }

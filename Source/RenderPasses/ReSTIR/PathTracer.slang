@@ -291,13 +291,28 @@ void handleMiss(const PathTracerData pt, inout PathData path)
 
 void evalDirect(const PathTracerData pt, ShadingData sd, inout PathData path)
 {
-    for (uint i = 0; i < kLightSamplesPerVertex; ++i)
+    uint2 LaunchIndex = DispatchRaysIndex().xy;
+    for (int i = 0; i < ReservoirPerPixel; i++)
     {
+        float4 CurrRes = RIS(pt, sd, path, CandidateCount);
+        uint xi = CurrRes.r;
+        float3 LightPos = float3(0.0f);
+        float3 LightLi = float3(0.0f);
         ShadowRay shadowRay = {};
-        bool valid = generateReSTIRShadowRay(pt.params, pt.envMapSampler, pt.emissiveSampler, sd, i, path, path.sg, shadowRay);
+        bool valid = generateReSTIRShadowRay(pt.params, pt.envMapSampler, pt.emissiveSampler, sd, path, path.sg, shadowRay, xi, LightPos, LightLi);
         bool visible = traceShadowRay(path.origin, shadowRay.rayParams.xyz, shadowRay.rayParams.w, valid);
-        path.L += visible ? shadowRay.Lr : float3(0.f);
+        if (!visible) 
+        {
+            LightPos = float3(0.0f);
+            LightLi = float3(0.0f);
+            CurrRes.w = 0;
+        }
+        ReservoirCurr[uint3(LaunchIndex, i)] = CurrRes;
+        FinalLightLi[uint3(LaunchIndex,i)] = float4(LightLi, 1.0f);
+        FinalLightPos[uint3(LaunchIndex,i)] = float4(LightPos, 1.0f);
     }
+    //path.L += visible ? shadowRay.Lr : float3(0.f);
+
 }
 
 void tracePath(const PathTracerData pt, ShadingData sd, inout PathData path)

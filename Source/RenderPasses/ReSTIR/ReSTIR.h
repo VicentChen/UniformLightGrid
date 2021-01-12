@@ -50,7 +50,8 @@ public:
     virtual std::string getDesc() override { return sDesc; }
     virtual void setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene) override;
     virtual void execute(RenderContext* pRenderContext, const RenderData& renderData) override;
-
+    virtual RenderPassReflection reflect(const CompileData& compileData) override;
+    void renderUI(Gui::Widgets& widget) override;
     static const char* sDesc;
 
 private:
@@ -66,5 +67,9 @@ private:
         RtProgram::SharedPtr pProgram;
         RtProgramVars::SharedPtr pVars;
         ParameterBlock::SharedPtr pParameterBlock;      ///< ParameterBlock for all data.
-    } mTracer;
+    } mTracer, m_FinalTracer;
+
+    uint32_t m_CandidateCount = 32;
+    uint32_t m_ReservoirPerPixel = 4;
 };
+
