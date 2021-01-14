@@ -54,9 +54,14 @@ namespace
     const std::string kCurrReservoir = "Current Reservoir";
     const std::string kPrevReservoir = "Previous Reservoir";
     const std::string kTemporalReservoir = "Temporal Reservoir";
-    const std::string kFinalLightPos = "FinalLightPos";
-    const std::string kFinalLightLi = "FinalLightLi";
+    const std::string kSpatialReservoir = "Spatial Reservoir";
+    const std::string kuFinalCurr = "uFinalCurr";
+    const std::string kuFinalPrev = "uFInalPrev";
+    const std::string kuFinalTemporal = "uFinalTemporal";
+    const std::string kuFinalSpatial = "uFinalSpatial";
 
+    // Input
+    const std::string kMotionVector = "MotionVec";
     const Falcor::ChannelList kOutputChannels =
     {
         { kColorOutput,     "gOutputColor",               "Output color (linear)", true /* optional */                              },
@@ -86,7 +91,8 @@ ReSTIR::SharedPtr ReSTIR::create(RenderContext* pRenderContext, const Dictionary
 ReSTIR::ReSTIR(const Dictionary& dict)
     : PathTracer(dict, kOutputChannels)
 {
-    mSelectedEmissiveSampler = EmissiveLightSamplerType::Uniform;
+    mSelectedEmissiveSampler = EmissiveLightSamplerType::Power;
+
     // Create ray tracing program.
     {
         RtProgram::Desc progDesc;
@@ -106,8 +112,6 @@ ReSTIR::ReSTIR(const Dictionary& dict)
         progDesc.setMaxTraceRecursionDepth(kMaxRecursionDepth);
         m_FinalTracer.pProgram = RtProgram::create(progDesc, kMaxPayloadSizeBytes, kMaxAttributesSizeBytes);
     }
-
-
 }
 
 void ReSTIR::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)
@@ -126,10 +130,20 @@ void ReSTIR::execute(RenderContext* pRenderContext, const RenderData& renderData
     Texture::SharedPtr pCurrReservoir = renderData[kCurrReservoir]->asTexture();
     Texture::SharedPtr pPrevReservoir = renderData[kPrevReservoir]->asTexture();
     Texture::SharedPtr pTemporalReservoir = renderData[kTemporalReservoir]->asTexture();
-    Texture::SharedPtr pFinalLightPos = renderData[kFinalLightPos]->asTexture();
-    Texture::SharedPtr pFinalLightLi = renderData[kFinalLightLi]->asTexture();
+    Texture::SharedPtr pSpatialReservoir = renderData[kSpatialReservoir]->asTexture();
+    Texture::SharedPtr puFinalCurr = renderData[kuFinalCurr]->asTexture();
+    Texture::SharedPtr puFinalPrev = renderData[kuFinalPrev]->asTexture();
+    Texture::SharedPtr puFinalTemporal = renderData[kuFinalTemporal]->asTexture();
+    Texture::SharedPtr puFinalSpatial = renderData[kuFinalSpatial]->asTexture();
     Texture::SharedPtr pOutputColor = renderData[kColorOutput]->asTexture();
-
+    Texture::SharedPtr pMotionVector = renderData[kMotionVector]->asTexture();
+    pRenderContext->clearTexture(pOutputColor.get());
+    if (m_IsClearPrev)
+    {
+        pRenderContext->clearTexture(pPrevReservoir.get());
+        pRenderContext->clearTexture(puFinalPrev.get());
+        m_IsClearPrev = false;
+    }
     // Call shared pre-render code.
     if (!beginFrame(pRenderContext, renderData)) return;
 
@@ -155,6 +169,11 @@ void ReSTIR::execute(RenderContext* pRenderContext, const RenderData& renderData
             mTracer.pVars = nullptr;
          /*   m_FinalTracer.pVars = nullptr;*/
         }
+
+        //if (pFinalProgram->addDefines(mpEmissiveSampler->getDefines()))
+        //{
+        //    m_FinalTracer.pVars = nullptr;
+        //}
     }
 
     // Prepare program vars. This may trigger shader compilation.
@@ -197,6 +216,10 @@ void ReSTIR::execute(RenderContext* pRenderContext, const RenderData& renderData
     mpPixelDebug->prepareProgram(pProgram, mTracer.pVars->getRootVar());
     mpPixelStats->prepareProgram(pProgram, mTracer.pVars->getRootVar());
 
+    m_LastCameraMatrix = m_CurrCameraMatrix;
+    m_CurrCameraMatrix = mpScene->getCamera()->getViewProjMatrix();
+
+    static bool IsInitLight = true;
     // Spawn the rays.
     {
         PROFILE("ReSTIR::execute()_RayTrace");
@@ -204,27 +227,43 @@ void ReSTIR::execute(RenderContext* pRenderContext, const RenderData& renderData
         mTracer.pVars["ReservoirTemporal"] = pTemporalReservoir;
         mTracer.pVars["ReservoirCurr"] = pCurrReservoir;
         mTracer.pVars["ReservoirPrev"] = pPrevReservoir;
-        mTracer.pVars["FinalLightPos"] = pFinalLightPos;
-        mTracer.pVars["FinalLightLi"] = pFinalLightLi;
+        mTracer.pVars["uFinalCurr"] = puFinalCurr;
+        mTracer.pVars["uFinalPrev"] = puFinalPrev;
+        mTracer.pVars["uFinalTemporal"] = puFinalTemporal;
+        mTracer.pVars["MotionVector"] = pMotionVector;
         mTracer.pVars["PerFrameCB"]["CandidateCount"] = m_CandidateCount;
         mTracer.pVars["PerFrameCB"]["ReservoirPerPixel"] = m_ReservoirPerPixel;
-
+        mTracer.pVars["PerFrameCB"]["IsTemporalReuse"] = m_IsTemporalReuse;
+        mTracer.pVars["PerFrameCB"]["IsInitLight"] = IsInitLight;
+        mTracer.pVars["PerFrameCB"]["LastCameraMatrix"] = m_LastCameraMatrix;
+        mTracer.pVars["PerFrameCB"]["IsUseMotionVector"] = m_IsUseMotionVector;
         mpScene->raytrace(pRenderContext, mTracer.pProgram.get(), mTracer.pVars, uint3(targetDim, 1));
     }
 
     {
         PROFILE("ReSTIR::execute()_RayTrace");
 
+        m_FinalTracer.pVars["ReservoirTemporal"] = pTemporalReservoir;
         m_FinalTracer.pVars["ReservoirCurr"] = pCurrReservoir;
         m_FinalTracer.pVars["ReservoirPrev"] = pPrevReservoir;
-        m_FinalTracer.pVars["FinalLightPos"] = pFinalLightPos;
-        m_FinalTracer.pVars["FinalLightLi"] = pFinalLightLi;
-        m_FinalTracer.pVars["gOutputColor"] = pOutputColor;
+        m_FinalTracer.pVars["ReservoirSpatial"] = pSpatialReservoir;
+        m_FinalTracer.pVars["uFinalCurr"] = puFinalCurr;
+        m_FinalTracer.pVars["uFinalPrev"] = puFinalPrev;
+        m_FinalTracer.pVars["uFinalTemporal"] = puFinalTemporal;
+        m_FinalTracer.pVars["uFinalSpatial"] = puFinalSpatial;
+        m_FinalTracer.pVars["MotionVector"] = pMotionVector;
+        m_FinalTracer.pVars["PerFrameCB"]["CandidateCount"] = m_CandidateCount;
         m_FinalTracer.pVars["PerFrameCB"]["ReservoirPerPixel"] = m_ReservoirPerPixel;
+        m_FinalTracer.pVars["PerFrameCB"]["IsTemporalReuse"] = m_IsTemporalReuse;
+        m_FinalTracer.pVars["PerFrameCB"]["IsSpatialReuse"] = m_IsSpatialReuse;
+        m_FinalTracer.pVars["PerFrameCB"]["NeighborCount"] = m_NeighborCount;
+        m_FinalTracer.pVars["PerFrameCB"]["NeighborsRange"] = m_NeighborsRange;
+        m_FinalTracer.pVars["PerFrameCB"]["FrameCount"] = m_FrameCount++;
+        m_FinalTracer.pVars["gOutputColor"] = pOutputColor;
 
         mpScene->raytrace(pRenderContext, m_FinalTracer.pProgram.get(), m_FinalTracer.pVars, uint3(targetDim, 1));
     }
-
+    IsInitLight = false;
     // Call shared post-render code.
     endFrame(pRenderContext, renderData);
 }
@@ -232,12 +271,15 @@ void ReSTIR::execute(RenderContext* pRenderContext, const RenderData& renderData
 RenderPassReflection ReSTIR::reflect(const CompileData& compileData)
 {
     auto Reflector = PathTracer::reflect(compileData);
+    Reflector.addInput(kMotionVector, "Motion Vector");
     Reflector.addInternal(kCurrReservoir, "Current Reservoir").format(ResourceFormat::RGBA32Float).bindFlags(ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess).texture2D(WINDOW_WIDTH, WINDOW_HEIGHT, 1, 1, 8);
     Reflector.addInternal(kPrevReservoir, "Previous Reservoir").format(ResourceFormat::RGBA32Float).bindFlags(ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess).texture2D(WINDOW_WIDTH, WINDOW_HEIGHT, 1, 1, 8);
     Reflector.addInternal(kTemporalReservoir, "Temporal Reservoir").format(ResourceFormat::RGBA32Float).bindFlags(ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess).texture2D(WINDOW_WIDTH, WINDOW_HEIGHT, 1, 1, 8);
-    Reflector.addInternal(kFinalLightLi, "Final Light Li").format(ResourceFormat::RGBA32Float).bindFlags(ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess).texture2D(WINDOW_WIDTH, WINDOW_HEIGHT, 1, 1, 8);
-    Reflector.addInternal(kFinalLightPos, "Final Light Pos").format(ResourceFormat::RGBA32Float).bindFlags(ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess).texture2D(WINDOW_WIDTH, WINDOW_HEIGHT, 1, 1, 8);
-
+    Reflector.addInternal(kSpatialReservoir, "Spatial Reservoir").format(ResourceFormat::RGBA32Float).bindFlags(ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess).texture2D(WINDOW_WIDTH, WINDOW_HEIGHT, 1, 1, 8);
+    Reflector.addInternal(kuFinalCurr, "u Final Current").format(ResourceFormat::RGBA32Float).bindFlags(ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess).texture2D(WINDOW_WIDTH, WINDOW_HEIGHT, 1, 1, 8);
+    Reflector.addInternal(kuFinalPrev, "u Final Previous").format(ResourceFormat::RGBA32Float).bindFlags(ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess).texture2D(WINDOW_WIDTH, WINDOW_HEIGHT, 1, 1, 8);
+    Reflector.addInternal(kuFinalTemporal, "u Final Temporal").format(ResourceFormat::RGBA32Float).bindFlags(ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess).texture2D(WINDOW_WIDTH, WINDOW_HEIGHT, 1, 1, 8);
+    Reflector.addInternal(kuFinalSpatial, "u Final Spatial").format(ResourceFormat::RGBA32Float).bindFlags(ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess).texture2D(WINDOW_WIDTH, WINDOW_HEIGHT, 1, 1, 8);
     return Reflector;
 }
 
@@ -312,6 +354,10 @@ void ReSTIR::renderUI(Gui::Widgets& widget)
 {
     widget.var("Candidate Count", m_CandidateCount, 1u, 64u);
     widget.var("Reservoir Per Pixel", m_ReservoirPerPixel, 1u, 8u);
-
+    widget.var("Neighbor Count", m_NeighborCount, 1u, 7u);
+    widget.var("Neighbor Range", m_NeighborsRange, 1.f, 100.f, 1.f);
+    if (widget.checkbox("Temporal reuse?", m_IsTemporalReuse)) m_IsClearPrev = true;
+    widget.checkbox("Spatial reuse?", m_IsSpatialReuse);
+    widget.checkbox("Use Motion Vector?", m_IsUseMotionVector);
     PathTracer::renderUI(widget);
 }

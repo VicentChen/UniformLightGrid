@@ -289,30 +289,86 @@ void handleMiss(const PathTracerData pt, inout PathData path)
     }
 }
 
-void evalDirect(const PathTracerData pt, ShadingData sd, inout PathData path)
+void evalReSTIRDirect(const PathTracerData pt, ShadingData sd, inout PathData path)
 {
     uint2 LaunchIndex = DispatchRaysIndex().xy;
+    uint2 LaunchDim = DispatchRaysDimensions().xy;
     for (int i = 0; i < ReservoirPerPixel; i++)
     {
-        float4 CurrRes = RIS(pt, sd, path, CandidateCount);
+        float2 u = 0;
+        float pdf = 0;
+        float4 CurrRes = RIS(pt.emissiveSampler, sd, path, CandidateCount, u, pdf);
         uint xi = CurrRes.r;
-        float3 LightPos = float3(0.0f);
-        float3 LightLi = float3(0.0f);
+ 
         ShadowRay shadowRay = {};
-        bool valid = generateReSTIRShadowRay(pt.params, pt.envMapSampler, pt.emissiveSampler, sd, path, path.sg, shadowRay, xi, LightPos, LightLi);
+        bool valid = generateReSTIRShadowRay(sd, path, path.sg, shadowRay, xi, u, pdf);
         bool visible = traceShadowRay(path.origin, shadowRay.rayParams.xyz, shadowRay.rayParams.w, valid);
-        if (!visible) 
-        {
-            LightPos = float3(0.0f);
-            LightLi = float3(0.0f);
-            CurrRes.w = 0;
-        }
+        //path.L += visible ? shadowRay.Lr : float3(0.f);
+        if (!visible) CurrRes.w = 0;
         ReservoirCurr[uint3(LaunchIndex, i)] = CurrRes;
-        FinalLightLi[uint3(LaunchIndex,i)] = float4(LightLi, 1.0f);
-        FinalLightPos[uint3(LaunchIndex,i)] = float4(LightPos, 1.0f);
-    }
-    //path.L += visible ? shadowRay.Lr : float3(0.f);
+        uFinalCurr[uint3(LaunchIndex, i)] = float4(u, pdf, 1.0f);
 
+        if (IsTemporalReuse && !IsInitLight)
+        {
+            const float2 Motion = MotionVector[LaunchIndex].xy;
+            int2 PrevIndex = 0;
+            if (IsUseMotionVector)
+            {
+                PrevIndex = int2(float2(LaunchIndex) + Motion.xy * LaunchDim + float2(0.5,0.5));
+                //const float2 PrevIndex = LaunchIndex + Motion.xy * LaunchDim;
+            }
+            else
+            {
+                float4 WorldPos = float4(sd.posW, 1.0f);
+                float4 ScreenSpace = mul(WorldPos, LastCameraMatrix);
+                ScreenSpace /= ScreenSpace.w;
+                PrevIndex = LaunchIndex.xy;
+                PrevIndex.x = ((ScreenSpace.x + 1.f) / 2.f) * (float)LaunchDim.x;
+                PrevIndex.y = ((1.f - ScreenSpace.y) / 2.f) * (float)LaunchDim.y;	
+            }
+            if(PrevIndex.x >= 0 && PrevIndex.x < 1920 && PrevIndex.y >= 0 && PrevIndex.y < 1080)
+            {					
+                float4 Res2Combine[8];
+                float3 PixelPos[8];
+                float2 uArray[8];
+                float  pdfArray[8];
+                Res2Combine[0] = CurrRes;
+                uArray[0] = uFinalCurr[uint3(LaunchIndex, i)].xy;
+                pdfArray[0] = uFinalCurr[uint3(LaunchIndex, i)].z;
+                //PixelPos[0] = WorldPos.xyz;
+                Res2Combine[1] = ReservoirPrev[uint3(PrevIndex, i)];
+                uArray[1] = uFinalPrev[uint3(PrevIndex, i)].xy;
+                pdfArray[1] = uFinalPrev[uint3(LaunchIndex, i)].z;
+                //PixelPos[1] = PrevPos[PrevIndex].xyz;
+
+                float4 Res = float4(0.0f);
+
+                Res = CombineReservoirs(sd, path.sg, Res2Combine, uArray, pdfArray, 2, u, pdf);
+
+                ReservoirTemporal[uint3(LaunchIndex, i)] = Res;
+                uFinalTemporal[uint3(LaunchIndex, i)] = float4(u, pdf, 1.0f);
+            }
+        }
+        else
+        {
+            ReservoirPrev[uint3(LaunchIndex, i)] = float4(0.0f);
+            uFinalPrev[uint3(LaunchIndex, i)] = float4(0.5f, 0.5f, 0.0, 0.0);
+			ReservoirTemporal[uint3(LaunchIndex, i)] = CurrRes;
+            uFinalTemporal[uint3(LaunchIndex, i)] = uFinalCurr[uint3(LaunchIndex, i)];
+        }
+    }
+
+}
+
+void evalDirect(const PathTracerData pt, ShadingData sd, inout PathData path)
+{
+    for (uint i = 0; i < kLightSamplesPerVertex; ++i)
+    {
+        ShadowRay shadowRay = {};
+        bool valid = generateShadowRay(pt.params, pt.envMapSampler, pt.emissiveSampler, sd, i, path, path.sg, shadowRay);
+        bool visible = traceShadowRay(path.origin, shadowRay.rayParams.xyz, shadowRay.rayParams.w, valid);
+        path.L += visible ? shadowRay.Lr : float3(0.f);
+    }
 }
 
 void tracePath(const PathTracerData pt, ShadingData sd, inout PathData path)
@@ -341,7 +397,8 @@ void tracePath(const PathTracerData pt, ShadingData sd, inout PathData path)
         // Compute direct illumination.
         if (kUseNEE && supportsNEE && (kUseLightsInDielectricVolumes || !path.isInsideVolume()))
         {
-            evalDirect(pt, sd, path);
+            if (depth == 0) evalReSTIRDirect(pt, sd, path);
+            else evalDirect(pt, sd, path);
         }
 
         // Russian roulette to stochastically terminate the path.

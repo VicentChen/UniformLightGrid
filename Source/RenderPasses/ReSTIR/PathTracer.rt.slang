@@ -200,7 +200,7 @@ void rayGen()
 
     // Write outputs.
     // These are all optional so using compile-time checks to decide which ones to write.
-    //if (isValid(gOutputColor)) gOutputColor[launchIndex] = float4(outColor, outAlpha);
+    if (isValid(gOutputColor)) gOutputColor[launchIndex] = float4(outColor, outAlpha);
     //if (isValid(gOutputAlbedo)) gOutputAlbedo[launchIndex] = float4(outAlbedo, 1);
 
     // Write time.

@@ -11,24 +11,91 @@ __exported import Experimental.Scene.Lights.LightHelpers;
 __exported import RenderPasses.Shared.PathTracer.PathData;
 __exported import RenderPasses.Shared.PathTracer.PathTracerParams;
 __exported import Utils.Sampling.SampleGeneratorInterface;
+__exported import RenderPasses.Shared.PathTracer.PathTracerHelpers;
+import Experimental.Scene.Lights.EmissivePowerSampler;
 
 cbuffer PerFrameCB
 {		
 	bool  IsInitLight;		// For ReSTIR - to choose an arbitrary light for this pixel after choosing 32 random light candidates
 	bool IsTemporalReuse;
-	float4x4 LastCameraMatrix;
 	uint CandidateCount;
 	uint ReservoirPerPixel;
 	bool Unbiased;
+    float4x4 LastCameraMatrix;
+    bool IsUseMotionVector;
+    bool IsSpatialReuse;
+    uint NeighborCount;
+    float NeighborsRange;
+    uint FrameCount;
 }
 
 RWTexture2DArray<float4> ReservoirTemporal;
 RWTexture2DArray<float4> ReservoirCurr;		// For ReSTIR - need to be read-write because it is also updated in the shader as wellRWTexture2D<float4> gOutput; 
 RWTexture2DArray<float4> ReservoirPrev;
-RWTexture2DArray<float4> FinalLightPos;
-RWTexture2DArray<float4> FinalLightLi;
+RWTexture2DArray<float4> ReservoirSpatial;
+RWTexture2DArray<float4> uFinalCurr;
+RWTexture2DArray<float4> uFinalPrev;
+RWTexture2DArray<float4> uFinalTemporal;
+RWTexture2DArray<float4> uFinalSpatial;
+Texture2D<float4> MotionVector;
 
-bool getLightSample<S : ISampleGenerator>(in uint xi, const PathTracerParams params, const EnvMapSampler envMapSampler, const EmissiveLightSampler emissiveSampler, const ShadingData sd, const float3 rayOrigin, inout S sg, out SceneLightSample ls)
+float evalReSTIRMIS(float n0, float p0, float n1, float p1)
+{
+    switch (kMISHeuristic)
+    {
+    case MISHeuristic::BalanceHeuristic:
+    {
+        float q0 = n0 * p0;
+        float q1 = n1 * p1;
+        return q0 / (q0 + q1);
+    }
+    case MISHeuristic::PowerTwoHeuristic:
+    {
+        float q0 = (n0 * p0) * (n0 * p0);
+        float q1 = (n1 * p1) * (n1 * p1);
+        return q0 / (q0 + q1);
+    }
+    default:
+        return 0.f;
+    }
+}
+
+bool importanceSampleEmissive<S : ISampleGenerator>(EmissivePowerSampler emissiveSampler, out uint xi, out float2 u, out float pdf, const float3 posW, inout S sg)
+{
+    TriangleLightSample ls;
+    EmissivePower _emissivePower = emissiveSampler._emissivePower;
+
+    if (gScene.lightCollection.isEmpty()) return false;
+
+    // Randomly pick a triangle out of the global list with uniform probability.
+    float uLight = sampleNext1D(sg);
+    uint triangleCount = gScene.lightCollection.triangleCount;
+    // Safety precaution as the result of the multiplication may be rounded to triangleCount even if uLight < 1.0 when triangleCount is large.
+    uint triangleIndex = min((uint)(uLight * triangleCount), triangleCount - 1);
+
+    uint2 packed = _emissivePower.triangleAliasTable[triangleIndex];
+    float threshold = f16tof32(packed.x >> 16u);
+    uint  selectAbove = ((packed.x & 0xFFFFu) << 8u) | ((packed.y >> 24u) & 0xFFu);
+    uint  selectBelow = packed.y & 0xFFFFFFu;
+
+    // Test the threshold in the current table entry; pick one of the two options
+    triangleIndex = (sampleNext1D(sg) >= threshold) ? selectAbove : selectBelow;
+
+    float triangleSelectionPdf = gScene.lightCollection.fluxData[triangleIndex].flux * _emissivePower.invWeightsSum;
+
+    // Sample the triangle uniformly.
+    u = sampleNext2D(sg);
+    xi = triangleIndex;
+    pdf = triangleSelectionPdf;
+
+    if (!sampleTriangle(posW, triangleIndex, u, ls)) return false;
+
+    // The final probability density is the product of the sampling probabilities.
+    ls.pdf *= triangleSelectionPdf;
+    return true;
+}
+
+bool getLightSample<S : ISampleGenerator>(in uint xi, in float2 u, in float triangleSelectionPdf, const ShadingData sd, const float3 rayOrigin, inout S sg, out SceneLightSample ls)
 {
     float p[3];
     p[0] = 1.f;
@@ -52,6 +119,7 @@ bool getLightSample<S : ISampleGenerator>(in uint xi, const PathTracerParams par
         float selectionPdf = p[1] / LightCount; // TODO: Precompute 1.f/lightCount in cbuffer
         // Sample local light source.
         AnalyticLightSample lightSample;
+        // Only support point and direction light
         bool valid = sampleLight(rayOrigin, gScene.getLight(xi), sg, lightSample);
         // Reject sample if lower hemisphere.
         if (!valid || dot(sd.N, lightSample.dir) < kMinCosTheta) return false;
@@ -71,8 +139,8 @@ bool getLightSample<S : ISampleGenerator>(in uint xi, const PathTracerParams par
 
         // Sample emissive lights.
         TriangleLightSample lightSample;
-        bool valid = sampleTriangle(sd.posW, xi - LightCount, sampleNext2D(sg), lightSample);
-        float triangleSelectionPdf = 1.f / (float)EmissiveCount;
+        uint triangleIndex = xi - LightCount;
+        bool valid = sampleTriangle(sd.posW, triangleIndex, u, lightSample);
         lightSample.pdf *= triangleSelectionPdf;
 
         // Reject sample if lower hemisphere.
@@ -84,7 +152,7 @@ bool getLightSample<S : ISampleGenerator>(in uint xi, const PathTracerParams par
         if (kUseMIS && pdf > 0.f)
         {
             float brdfPdf = evalPdfScatter(sd, lightSample.dir);
-            misWeight = evalMIS(params, numSamples, pdf, 1, brdfPdf);
+            misWeight = evalReSTIRMIS(numSamples, pdf, 1, brdfPdf);
         }
 
         // Compute offset light sample position to reduce self-intersections at the light.
@@ -106,13 +174,12 @@ bool getLightSample<S : ISampleGenerator>(in uint xi, const PathTracerParams par
 }
 
 
-bool generateReSTIRShadowRay<S : ISampleGenerator>(const PathTracerParams params, const EnvMapSampler envMapSampler, const EmissiveLightSampler emissiveSampler, const ShadingData sd, inout PathData path, inout S sg, inout ShadowRay shadowRay, in uint xi, out float3 lightPos, out float3 lightLi)
+bool generateReSTIRShadowRay<S : ISampleGenerator>(const ShadingData sd, inout PathData path, inout S sg, inout ShadowRay shadowRay, in uint xi, in float2 u, in float pdf)
 {
     // Sample the scene lights.
     SceneLightSample ls;
-    bool valid = getLightSample(xi, params, envMapSampler, emissiveSampler, sd, path.origin, sg, ls);
-    lightLi = ls.Li * path.thp;
-    lightPos = ls.rayDistance * ls.rayDir + sd.posW;
+    bool valid = getLightSample(xi, u, pdf, sd, path.origin, sg, ls);
+
     if (valid && any(ls.Li > 0.f))
     {
         float3 Lr = evalBSDFCosine(sd, ls.dir) * ls.Li * path.thp;
@@ -129,17 +196,35 @@ bool generateReSTIRShadowRay<S : ISampleGenerator>(const PathTracerParams params
     return false;
 }
 
-float evalPHat(in uint xi, const PathTracerData pt, ShadingData sd, inout PathData path)
+float3 evalColor(in uint xi, in float2 u, in float pdf, ShadingData sd)
 {
     SceneLightSample ls;
-    getLightSample(xi, pt.params, pt.envMapSampler, pt.emissiveSampler, sd, path.origin, path.sg, ls);
+    const float3 rayOrigin = sd.computeNewRayOrigin();
+    SampleGenerator Sg = SampleGenerator.create(uint2(0, 0), 1);
+    getLightSample(xi, u, pdf, sd, rayOrigin, Sg, ls);
     float3 Lr = evalBSDFCosine(sd, ls.dir) * ls.Li;
-    float PHat = length(Lr);
 
+    return Lr;
+}
+
+// float evalPHat(in uint xi, in float2 u, ShadingData sd, inout PathData path)
+// {
+//     SceneLightSample ls;
+//     getLightSample(xi, u, sd, path.origin, path.sg, ls);
+//     float3 Lr = evalBSDFCosine(sd, ls.dir) * ls.Li;
+//     float PHat = length(Lr);
+//     return PHat;
+// }
+
+float evalPHat(in uint xi, in float2 u, in float pdf, ShadingData sd)
+{
+    float3 Lr = evalColor(xi, u, pdf, sd);
+    float PHat = length(Lr);
+    if (isnan(PHat) || isinf(PHat)) PHat = 0;
     return PHat;
 }
 
-bool update(inout float4 res, uint xi, float w, SampleGenerator sg)
+bool update<S : ISampleGenerator>(inout float4 res, uint xi, float w, inout S sg)
 {
 	res.g += w;
 	res.b += 1;
@@ -151,58 +236,83 @@ bool update(inout float4 res, uint xi, float w, SampleGenerator sg)
     return false;
 }
 
-float4 RIS(const PathTracerData pt, ShadingData sd, inout PathData path, const uint count)
+float4 RIS(EmissivePowerSampler emissiveSampler, ShadingData sd, inout PathData path, const uint count, out float2 uFinal, out float pdfFinal)
 {
 	float4 r = float4(0.0f);
 	uint xi = 0;
+    float2 u = 0;
+    float pdf = 0;
 	float PHat = 0;
     float PHatFinal = 0;
+    uFinal = 0;
+    pdfFinal = 0;
     uint TotalLightCount = gScene.getLightCount() + gScene.lightCollection.triangleCount;
 	for(int i = 0; i < count; i++)
 	{
 		xi = min(sampleNext1D(path.sg) * TotalLightCount, TotalLightCount - 1);
-		PHat = evalPHat(xi, pt, sd, path);
+        u = sampleNext2D(path.sg);
+        pdf = 0;
+        if (xi >= gScene.getLightCount())
+        {
+            importanceSampleEmissive(emissiveSampler, xi, u, pdf, path.origin, path.sg);
+            xi += gScene.getLightCount();
+        }
+		PHat = evalPHat(xi, u, pdf, sd);
 		
 		if (update(r, xi, PHat, path.sg))
+        {
             PHatFinal = PHat;
+            uFinal = u;
+            pdfFinal = pdf;
+        }
 	}
 	xi = r.r;
-	
-	//PHat = evalPHat(xi, pt, sd, path);
-	
+
 	r.a = 1 / max(PHatFinal, 0.0001f) * (r.g / max(r.b, 0.0001f));
 
 	return r;
 }
 
-// float4 CombineReservoirs(ShadingData sd, float4 res[8], uint resCount, SampleGenerator sg)
-// {
-// 	float4 s = float4(0.0f);	
-// 	float M = 0;
-// 	uint xi = 0;
-// 	float PHat = 0;
-// 	for(int i = 0; i < resCount; i++)
-// 	{
-// 		//res[i].b = min (20.f * res[0].b, res[i].b);
-// 		if (20.f * res[0].b < res[i].b)
-// 		{
-// 			res[i].b = 20.f * res[0].b;
-// 			res[i].g *= 20.f * res[0].b / res[i].b;
-// 		}
-// 		xi = res[i].r;
-// 		PHat = evalPHat(sd, xi);
+float4 CombineReservoirs<S : ISampleGenerator>(ShadingData sd, inout S sg, in float4 res[8], in float2 uArray[8], in float pdfArray[8], uint resCount, out float2 uFinal, out float pdfFinal)
+{
+	float4 s = float4(0.0f);	
+	float M = 0;
+	uint xi = 0;
+    float2 u = 0;
+    float pdf = 0;
+	float PHat = 0;
+    float PHatFinal = 0;
+    uFinal = 0;
+    pdfFinal = 0;
+	for(int i = 0; i < resCount; i++)
+	{
+		//res[i].b = min (20.f * res[0].b, res[i].b);
+		if (20.f * res[0].b < res[i].b)
+		{
+			res[i].b = 20.f * res[0].b;
+			res[i].g *= 20.f * res[0].b / res[i].b;
+		}
+		xi = res[i].r;
+        u = uArray[i];
+        pdf = pdfArray[i];
+		PHat = evalPHat(xi, u, pdf, sd);
 		
-// 		update(s, res[i].r, PHat * res[i].a * res[i].b, sg);
-// 		M += res[i].b;
-// 	}
-// 	xi = s.r;
-// 	s.b = M;
-// 	PHat = evalPHat(sd, xi);
+		if (update(s, res[i].r, PHat * res[i].a * res[i].b, sg))
+        {
+            PHatFinal = PHat;
+            uFinal = u;
+            pdfFinal = pdf;
+        }
+		M += res[i].b;
+	}
+	xi = s.r;
+	s.b = M;
+	//PHat = evalPHat(sd, xi);
 	
-// 	s.a = 1 / max(PHat, 0.0001f) * (s.g / max(s.b, 0.0001f));
+	s.a = 1 / max(PHatFinal, 0.0001f) * (s.g / max(s.b, 0.0001f));
 
-// 	return s;
-// }
+	return s;
+}
 
 // float4 CombineResservoirsUnbiased(ShadingData sd, float4 res[8], float3 q[8], uint resCount, SampleGenerator sg)
 // {

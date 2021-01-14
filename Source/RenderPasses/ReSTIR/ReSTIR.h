@@ -71,5 +71,15 @@ private:
 
     uint32_t m_CandidateCount = 32;
     uint32_t m_ReservoirPerPixel = 4;
+    uint32_t m_NeighborCount = 5;
+    uint32_t m_FrameCount = 0;
+    float m_NeighborsRange = 30.f;
+    bool m_IsTemporalReuse = true;
+    bool m_IsUseMotionVector = true;
+    bool m_IsClearPrev = false;
+    bool m_IsSpatialReuse = true;
+
+    float4x4 m_CurrCameraMatrix = float4x4(0.0);
+    float4x4 m_LastCameraMatrix = float4x4(0.0);
 };
 
