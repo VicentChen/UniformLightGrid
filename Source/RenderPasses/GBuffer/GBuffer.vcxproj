@@ -28,6 +28,7 @@
     <ClCompile Include="GBufferBase.cpp" />
     <ClCompile Include="GBuffer\GBuffer.cpp" />
     <ClCompile Include="GBuffer\GBufferRaster.cpp" />
+    <ClCompile Include="GBuffer\GBufferRasterWithView.cpp" />
     <ClCompile Include="GBuffer\GBufferRT.cpp" />
     <ClCompile Include="GBuffer\GBufferRTCurves.cpp" />
     <ClCompile Include="VBuffer\VBufferRaster.cpp" />
@@ -45,6 +46,7 @@
     <ClInclude Include="GBufferBase.h" />
     <ClInclude Include="GBuffer\GBuffer.h" />
     <ClInclude Include="GBuffer\GBufferRaster.h" />
+    <ClInclude Include="GBuffer\GBufferRasterWithView.h" />
     <ClInclude Include="GBuffer\GBufferRT.h" />
     <ClInclude Include="GBuffer\GBufferRTCurves.h" />
     <ClInclude Include="VBuffer\VBufferRaster.h" />
@@ -54,6 +56,7 @@
     <ShaderSource Include="GBuffer\GBufferHelpers.slang" />
     <ShaderSource Include="GBuffer\GBufferParams.slang" />
     <ShaderSource Include="GBuffer\GBufferRaster.3d.slang" />
+    <ShaderSource Include="GBuffer\GBufferRasterWithView.3d.slang" />
     <ShaderSource Include="GBuffer\GBufferRT.rt.slang" />
     <ShaderSource Include="VBuffer\VBufferRaster.3d.slang" />
     <ShaderSource Include="VBuffer\VBufferRT.rt.slang" />

@@ -27,6 +27,7 @@
  **************************************************************************/
 #include "GBufferBase.h"
 #include "GBuffer/GBufferRaster.h"
+#include "GBuffer/GBufferRasterWithView.h"
 #include "GBuffer/GBufferRT.h"
 #include "GBuffer/GBufferRTCurves.h"
 #include "VBuffer/VBufferRaster.h"
@@ -41,6 +42,7 @@ extern "C" __declspec(dllexport) const char* getProjDir()
 extern "C" __declspec(dllexport) void getPasses(Falcor::RenderPassLibrary& lib)
 {
     lib.registerClass("GBufferRaster", GBufferRaster::kDesc, GBufferRaster::create);
+    lib.registerClass("GBufferRasterWithView", GBufferRasterWithView::kDesc, GBufferRasterWithView::create);
     lib.registerClass("GBufferRT", GBufferRT::kDesc, GBufferRT::create);
     lib.registerClass("GBufferRTCurves", GBufferRTCurves::kDesc, GBufferRTCurves::create);
     lib.registerClass("VBufferRaster", VBufferRaster::kDesc, VBufferRaster::create);

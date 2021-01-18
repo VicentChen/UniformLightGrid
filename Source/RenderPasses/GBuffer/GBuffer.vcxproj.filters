@@ -20,6 +20,9 @@
     <ClCompile Include="GBuffer\GBufferRTCurves.cpp">
       <Filter>GBuffer</Filter>
     </ClCompile>
+    <ClCompile Include="GBuffer\GBufferRasterWithView.cpp">
+      <Filter>GBuffer</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="GBuffer\GBufferRaster.h">
@@ -39,6 +42,9 @@
       <Filter>VBuffer</Filter>
     </ClInclude>
     <ClInclude Include="GBuffer\GBufferRTCurves.h">
+      <Filter>GBuffer</Filter>
+    </ClInclude>
+    <ClInclude Include="GBuffer\GBufferRasterWithView.h">
       <Filter>GBuffer</Filter>
     </ClInclude>
   </ItemGroup>
@@ -68,6 +74,9 @@
     </ShaderSource>
     <ShaderSource Include="VBuffer\VBufferRaster.3d.slang">
       <Filter>VBuffer</Filter>
+    </ShaderSource>
+    <ShaderSource Include="GBuffer\GBufferRasterWithView.3d.slang">
+      <Filter>GBuffer</Filter>
     </ShaderSource>
   </ItemGroup>
 </Project>
