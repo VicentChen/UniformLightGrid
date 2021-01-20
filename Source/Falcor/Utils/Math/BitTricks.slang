@@ -73,7 +73,7 @@ uint deinterleave_32bit(uint x)
     \param[in] v 3 10-bit uint.
     \return 32-bit value.
 */
-uint interleave_32bit(uint3 v)
+uint interleave_uint3(uint3 v)
 {
     uint vx = interleave_32bit(v.x);
     uint vy = interleave_32bit(v.y);
@@ -86,9 +86,9 @@ uint interleave_32bit(uint3 v)
     \param[in] 30-bit interleaved morton code.
     \return 3 uints.
 */
-uint3 interleave_32bit(uint x)
+uint3 deinterleave_uint3(uint x)
 {
-    uint3 v;
+    uint3 v = 0;
     v.z = deinterleave_32bit(x);
     v.y = deinterleave_32bit(x >> 1);
     v.x = deinterleave_32bit(x >> 2);
