@@ -16,7 +16,7 @@ cbuffer PerFrameCB
 int calcCommonPrefix(uint l, uint r)
 {
 	if (r >= 0 && r < leafLength)
-		return 31 - floor(log2(float(Leaf[l].mortonCode ^ Leaf[r].mortonCode)));
+		return 31 - floor(log2(float(gLeafNodes[l].mortonCode ^ gLeafNodes[r].mortonCode)));
 	else
 		return -1;
 }
