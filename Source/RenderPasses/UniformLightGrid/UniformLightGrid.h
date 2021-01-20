@@ -56,6 +56,12 @@ public:
 private:
     UniformLightGrid(const Dictionary& dict);
 
+    void generateMortonCode() { /* TODO */ }
+    void sortLeafNodes() { /* TODO */ }
+    void constructBVHTree() { /* TODO */ }
+
+    void chooseGridsAndLights() { /* TODO */ }
+
     void recreateVars() override { mULGTracer.pVars = nullptr; }
     void prepareVars();
     void setTracerData(const RenderData& renderData);

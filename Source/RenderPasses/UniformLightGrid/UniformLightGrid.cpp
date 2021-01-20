@@ -28,6 +28,7 @@
 #include "UniformLightGrid.h"
 #include "RenderGraph/RenderPassHelpers.h"
 #include "Scene/HitInfo.h"
+#include "BVHNodeData.slangh"
 #include <sstream>
 
 namespace

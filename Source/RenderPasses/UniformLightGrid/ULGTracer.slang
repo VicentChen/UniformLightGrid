@@ -294,7 +294,7 @@ void evalDirect(const PathTracerData pt, ShadingData sd, inout PathData path)
     for (uint i = 0; i < kLightSamplesPerVertex; ++i)
     {
         ShadowRay shadowRay = {};
-        bool valid = generateShadowRay(pt.params, pt.envMapSampler, pt.emissiveSampler, sd, i, path, path.sg, shadowRay);
+        bool valid = generateULGShadowRay(pt.params, pt.envMapSampler, pt.emissiveSampler, sd, i, path, path.sg, shadowRay);
         bool visible = traceShadowRay(path.origin, shadowRay.rayParams.xyz, shadowRay.rayParams.w, valid);
         path.L += visible ? shadowRay.Lr : float3(0.f);
     }
