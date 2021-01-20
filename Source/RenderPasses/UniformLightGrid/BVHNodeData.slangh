@@ -1,0 +1,25 @@
+struct InternalNode
+{
+    bool isLChildLeaf = false;
+    bool isRChildLeaf = false;
+    uint commonPrefixLength = 0;
+
+    uint lChildId = 0;
+    uint rChildId = 0;
+    uint splitPoint = 0;
+    uint commonPrefix = 0;
+    uint2 range = uint2(0, 0);
+
+	bool isLChildLeaf() { return isLChildLeaf; }
+	bool isRChildLeaf() { return isRChildLeaf; }
+	uint getCommonPrefixLength() { return commonPrefixLength; }
+	[mutating] void setIsLChildLeaf(bool b) { isLChildLeaf = b; }
+	[mutating] void setIsRChildLeaf(bool b) { isRChildLeaf = b; }
+	[mutating] void setCommonPrefixLength(uint l) { commonPrefixLength = l; }
+}
+
+struct LeafNode
+{
+	uint mortonCode = 0;
+	uint triangleIdx = 0;
+}
