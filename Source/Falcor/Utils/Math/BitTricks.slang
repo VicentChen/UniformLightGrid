@@ -39,6 +39,63 @@
 */
 
 /** 32-bit bit interleave (Morton code).
+    "Insert" two 0 bits after each of the 10 low bits of x.
+    \param[in] x 10-bit integer.
+    \return 32-bit value.
+*/
+uint interleave_32bit(uint x)
+{
+    x &= 0x000003ff;                  // x = ---- ---- ---- ---- ---- --98 7654 3210
+    x = (x ^ (x << 16)) & 0xff0000ff; // x = ---- --98 ---- ---- ---- ---- 7654 3210
+    x = (x ^ (x <<  8)) & 0x0300f00f; // x = ---- --98 ---- ---- 7654 ---- ---- 3210
+    x = (x ^ (x <<  4)) & 0x030c30c3; // x = ---- --98 ---- 76-- --54 ---- 32-- --10
+    x = (x ^ (x <<  2)) & 0x09249249; // x = ---- 9--8 --7- -6-- 5--4 --3- -2-- 1--0
+    return x;
+}
+
+/** 32-bit bit de-interleave (inverse Morton code).
+    Inverse of interleave_32bit - "delete" all bits not at positions divisible by 3
+    \param[in] 30-bit interleaved morton code.
+    \return 10-bit unsigned integer.
+*/
+uint deinterleave_32bit(uint x)
+{
+    x &= 0x09249249;                  // x = ---- 9--8 --7- -6-- 5--4 --3- -2-- 1--0
+    x = (x ^ (x >>  2)) & 0x030c30c3; // x = ---- --98 ---- 76-- --54 ---- 32-- --10
+    x = (x ^ (x >>  4)) & 0x0300f00f; // x = ---- --98 ---- ---- 7654 ---- ---- 3210
+    x = (x ^ (x >>  8)) & 0xff0000ff; // x = ---- --98 ---- ---- ---- ---- 7654 3210
+    x = (x ^ (x >> 16)) & 0x000003ff; // x = ---- ---- ---- ---- ---- --98 7654 3210
+    return x;
+}
+
+/** 32-bit bit interleave (Morton code).
+    "Insert" two 0 bits after each of the 10 low bits of x.
+    \param[in] v 3 10-bit uint.
+    \return 32-bit value.
+*/
+uint interleave_32bit(uint3 v)
+{
+    uint vx = interleave_32bit(v.x);
+    uint vy = interleave_32bit(v.y);
+    uint vz = interleave_32bit(v.z);
+    return vx * 4 + vy * 2 + vz;
+}
+
+/** 32-bit bit de-interleave (inverse Morton code).
+    Inverse of interleave_32bit - "delete" all bits not at positions divisible by 3
+    \param[in] 30-bit interleaved morton code.
+    \return 3 uints.
+*/
+uint3 interleave_32bit(uint x)
+{
+    uint3 v;
+    v.z = deinterleave_32bit(x);
+    v.y = deinterleave_32bit(x >> 1);
+    v.x = deinterleave_32bit(x >> 2);
+    return v;
+}
+
+/** 32-bit bit interleave (Morton code).
     \param[in] v 16-bit values in the LSBs of each component (higher bits don't matter).
     \return 32-bit value.
 */
