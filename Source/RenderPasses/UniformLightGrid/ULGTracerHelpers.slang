@@ -3,7 +3,7 @@
 // TODO: Which ones need __exported
 import Scene.Scene;
 import Scene.ShadingData;
-import EmissiveULGSmapler;
+import EmissiveULGSampler;
 __exported import Utils.Helpers; // For computeRayOrigin()
 __exported import Utils.Math.MathHelpers;
 __exported import Experimental.Scene.Lights.EnvMapSampler;
@@ -12,6 +12,7 @@ __exported import Experimental.Scene.Lights.EmissiveLightSampler;
 __exported import Experimental.Scene.Lights.LightHelpers;
 __exported import RenderPasses.Shared.PathTracer.PathData;
 __exported import RenderPasses.Shared.PathTracer.PathTracerParams;
+__exported import RenderPasses.Shared.PathTracer.PathTracerHelpers;
 __exported import Utils.Sampling.SampleGeneratorInterface;
 
 // TODO: add textures

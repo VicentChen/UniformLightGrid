@@ -14,15 +14,15 @@ struct InternalNode
     uint2 range = uint2(0, 0);
 
 #ifdef HOST_CODE
-    bool isLChildLeaf() { return isLChildLeaf; }
-    bool isRChildLeaf() { return isRChildLeaf; }
+    bool getIsLChildLeaf() { return isLChildLeaf; }
+    bool getIsRChildLeaf() { return isRChildLeaf; }
     uint getCommonPrefixLength() { return commonPrefixLength; }
     void setIsLChildLeaf(bool b) { isLChildLeaf = b; }
     void setIsRChildLeaf(bool b) { isRChildLeaf = b; }
     void setCommonPrefixLength(uint l) { commonPrefixLength = l; }
 #else
-    bool isLChildLeaf() { return isLChildLeaf; }
-    bool isRChildLeaf() { return isRChildLeaf; }
+    bool getIsLChildLeaf() { return isLChildLeaf; }
+    bool getIsRChildLeaf() { return isRChildLeaf; }
     uint getCommonPrefixLength() { return commonPrefixLength; }
     [mutating] void setIsLChildLeaf(bool b) { isLChildLeaf = b; }
     [mutating] void setIsRChildLeaf(bool b) { isRChildLeaf = b; }

@@ -1,7 +1,7 @@
 // TODO:
 //   1. remove `commonPrefix` and get `commonPrefix` by `splitPoint` and `commonPrefixLength` 
 //   2. pack `isLChildLeaf`, `isRChildLeaf` and `commonPrefixLength` into a uint
-//   3. remove min and max in set `isLChildLeaf` and `isRChildLeaf`
+//   3. remove min and max in `setIsLChildLeaf` and `setIsRChildLeaf`
 //   4. add temp variable for getters and setters in `generateTree`
 #include "BVHNodeData.slangh"
 

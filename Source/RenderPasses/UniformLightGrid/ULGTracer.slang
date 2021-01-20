@@ -44,6 +44,7 @@ __exported import RenderPasses.Shared.PathTracer.PathTracerHelpers;
 __exported import RenderPasses.Shared.PathTracer.InteriorListHelpers;
 __exported import RenderPasses.Shared.PathTracer.RayFootprint;
 __exported import Utils.Debug.PixelDebug;
+import ULGTracerHelpers;
 
 static const bool kForceOpaque = !kUseAlphaTest;
 
