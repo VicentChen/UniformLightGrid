@@ -27,33 +27,44 @@
  **************************************************************************/
 #pragma once
 #include "Falcor.h"
-#include "FalcorExperimental.h"
+#include "RenderPasses/Shared/PathTracer/PathTracer.h"
 
 using namespace Falcor;
 
-class UniformLightGrid : public RenderPass
+/** Forward path tracer using a megakernel in DXR 1.0.
+
+    The path tracer has a loop over the path vertices in the raygen shader.
+    The kernel terminates when all paths have terminated.
+
+    This pass implements a forward path tracer with next-event estimation,
+    Russian roulette, and multiple importance sampling (MIS) with sampling
+    of BRDFs and light sources.
+*/
+class UniformLightGrid : public PathTracer
 {
 public:
     using SharedPtr = std::shared_ptr<UniformLightGrid>;
 
-    /** Create a new render pass object.
-        \param[in] pRenderContext The render context.
-        \param[in] dict Dictionary of serialized parameters.
-        \return A new object, or an exception is thrown if creation failed.
-    */
-    static SharedPtr create(RenderContext* pRenderContext = nullptr, const Dictionary& dict = {});
+    static SharedPtr create(RenderContext* pRenderContext, const Dictionary& dict);
 
-    virtual std::string getDesc() override;
-    virtual Dictionary getScriptingDictionary() override;
-    virtual RenderPassReflection reflect(const CompileData& compileData) override;
-    virtual void compile(RenderContext* pContext, const CompileData& compileData) override {}
+    virtual std::string getDesc() override { return sDesc; }
+    virtual void setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene) override;
     virtual void execute(RenderContext* pRenderContext, const RenderData& renderData) override;
-    virtual void renderUI(Gui::Widgets& widget) override;
-    virtual void setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene) override {}
-    virtual bool onMouseEvent(const MouseEvent& mouseEvent) override { return false; }
-    virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override { return false; }
+
+    static const char* sDesc;
 
 private:
-    UniformLightGrid() = default;
-    Scene::SharedPtr scene;
+    UniformLightGrid(const Dictionary& dict);
+
+    void recreateVars() override { mULGTracer.pVars = nullptr; }
+    void prepareVars();
+    void setTracerData(const RenderData& renderData);
+
+    // Ray tracing program.
+    struct
+    {
+        RtProgram::SharedPtr pProgram;
+        RtProgramVars::SharedPtr pVars;
+        ParameterBlock::SharedPtr pParameterBlock;      ///< ParameterBlock for all data.
+    } mULGTracer;
 };

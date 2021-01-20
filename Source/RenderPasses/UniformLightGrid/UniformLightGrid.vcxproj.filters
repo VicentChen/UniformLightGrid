@@ -6,4 +6,8 @@
   <ItemGroup>
     <ClInclude Include="UniformLightGrid.h" />
   </ItemGroup>
+  <ItemGroup>
+    <ShaderSource Include="BVH.slang" />
+    <ShaderSource Include="BVHNodeData.slangh" />
+  </ItemGroup>
 </Project>
