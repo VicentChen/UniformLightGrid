@@ -75,6 +75,7 @@ uint deinterleave_32bit(uint x)
 */
 uint interleave_uint3(uint3 v)
 {
+    // TODO: vectorize this operation
     uint vx = interleave_32bit(v.x);
     uint vy = interleave_32bit(v.y);
     uint vz = interleave_32bit(v.z);
