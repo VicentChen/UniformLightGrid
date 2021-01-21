@@ -88,8 +88,6 @@ UniformLightGrid::UniformLightGrid(const Dictionary& dict)
     leafGeneratorDefines.add("GROUP_SIZE", std::to_string(kGenBVHLeafNodesGroupSize));
     mpLeafNodeGenerator = ComputePass::create(kGenBVHLeafNodesFile, "genBVHLeafNodes", leafGeneratorDefines);
 
-    mpGpuSorter = BitonicSort::create();
-
     // Create ray tracing program.
     RtProgram::Desc progDesc;
     progDesc.addShaderLibrary(kULGTracerFile).setRayGen("rayGen");
@@ -110,6 +108,9 @@ void UniformLightGrid::generateBVHLeafNodes(RenderContext* pRenderContext)
     {
         mpBVHLeafNodesBuffer = Buffer::createStructured(mpLeafNodeGenerator->getRootVar()["gLeafNodes"], emissiveTriangleCount, Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false);
         mpBVHLeafNodesBuffer->setName("ULG::mpBVHLeafNodesBuffer");
+
+        mpBVHLeafNodesHelperBuffer = Buffer::createStructured(mpLeafNodeGenerator->getRootVar()["gLeafNodes"], emissiveTriangleCount, Resource::BindFlags::None, Buffer::CpuAccess::Write);
+        mpBVHLeafNodesHelperBuffer->setName("ULG::mpBVHLeafNodesHelperBuffer");
     }
 
     const auto& sceneBound = mpScene->getSceneBounds();
@@ -121,8 +122,29 @@ void UniformLightGrid::generateBVHLeafNodes(RenderContext* pRenderContext)
     var["sceneBound"]["maxPoint"] = sceneBound.maxPoint;
     mpLeafNodeGenerator->getRootVar()["gLeafNodes"] = mpBVHLeafNodesBuffer;
 
-    PROFILE("ULG_generateLeafNode");
+    PROFILE("ULG_generateBVHLeafNodes");
     mpLeafNodeGenerator->execute(pRenderContext, emissiveTriangleCount, 1, 1);
+}
+
+void UniformLightGrid::sortLeafNodes(RenderContext* pRenderContext)
+{
+    PROFILE("ULG_BitonicSortLeafNodes");
+    // TODO: move to gpu
+    uint32_t emissiveTriangleCount = mpScene->getLightCollection(pRenderContext)->getTotalLightCount();
+    size_t bufferSize = sizeof(::LeafNode) * emissiveTriangleCount;
+
+    std::vector<::LeafNode> leaves(emissiveTriangleCount);
+    ::LeafNode* pLeaves = (::LeafNode*)mpBVHLeafNodesBuffer->map(Buffer::MapType::Read);
+    memcpy(leaves.data(), pLeaves, bufferSize);
+    mpBVHLeafNodesBuffer->unmap();
+
+    std::sort(leaves.begin(), leaves.end(), [](const ::LeafNode& a, const ::LeafNode& b) { return a.mortonCode < b.mortonCode; });
+
+    pLeaves = (::LeafNode*)mpBVHLeafNodesHelperBuffer->map(Buffer::MapType::Write);
+    memcpy(pLeaves, leaves.data(), bufferSize);
+    mpBVHLeafNodesHelperBuffer->unmap();
+
+    pRenderContext->copyBufferRegion(mpBVHLeafNodesBuffer.get(), 0, mpBVHLeafNodesHelperBuffer.get(), 0, bufferSize);
 }
 
 void UniformLightGrid::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)
@@ -141,11 +163,11 @@ void UniformLightGrid::execute(RenderContext* pRenderContext, const RenderData& 
     // Call shared pre-render code.
     if (!beginFrame(pRenderContext, renderData)) return;
 
-    // Generate BVH leaf nodes.
-    {
-        /*PROFILE("ULG_generateLeafNode");*/
-        generateBVHLeafNodes(pRenderContext);
-    }
+    // ----- Uniform Light Grid Codes ----- //
+    generateBVHLeafNodes(pRenderContext);
+    sortLeafNodes(pRenderContext);
+
+    // ----- Uniform Light Grid Codes ----- //
 
     // Set compile-time constants.
     RtProgram::SharedPtr pProgram = mULGTracer.pProgram;

@@ -58,7 +58,7 @@ private:
     UniformLightGrid(const Dictionary& dict);
 
     void generateBVHLeafNodes(RenderContext* pRenderContext);
-    void sortLeafNodes(RenderContext* pRenderContext) { /* TODO */ }
+    void sortLeafNodes(RenderContext* pRenderContext);
     void constructBVHTree(RenderContext* pRenderContext) { /* TODO */ }
 
     void chooseGridsAndLights(RenderContext* pRenderContext) { /* TODO */ }
@@ -76,8 +76,7 @@ private:
     } mULGTracer;
 
     Buffer::SharedPtr mpBVHLeafNodesBuffer;
+    Buffer::SharedPtr mpBVHLeafNodesHelperBuffer;
     Buffer::SharedPtr mpBVHInternalNodesBuffer;
     ComputePass::SharedPtr mpLeafNodeGenerator;
-
-    BitonicSort::SharedPtr mpGpuSorter;
 };
