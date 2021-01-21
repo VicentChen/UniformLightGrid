@@ -34,4 +34,5 @@ struct LeafNode
 {
     uint mortonCode = 0;
     uint triangleIdx = 0;
+    float3 debug = float3(0, 0, 0);
 };

@@ -33,8 +33,13 @@
 
 namespace
 {
-    const char kShaderFile[] = "RenderPasses/UniformLightGrid/ULGTracer.rt.slang";
+    const char kGenBVHLeafNodesFile[] = "RenderPasses/UniformLightGrid/GenBVHLeafNodes.cs.slang";
+    const char kULGTracerFile[] = "RenderPasses/UniformLightGrid/ULGTracer.rt.slang";
+
     const char kParameterBlockName[] = "gData";
+
+    // Leaf node settings
+    const uint32_t kGenBVHLeafNodesGroupSize = 512;
 
     // Ray tracing settings that affect the traversal stack size.
     // These should be set as small as possible.
@@ -78,9 +83,16 @@ UniformLightGrid::SharedPtr UniformLightGrid::create(RenderContext* pRenderConte
 UniformLightGrid::UniformLightGrid(const Dictionary& dict)
     : PathTracer(dict, kOutputChannels)
 {
+    // Create leaf nodes generating program
+    Program::DefineList leafGeneratorDefines;
+    leafGeneratorDefines.add("GROUP_SIZE", std::to_string(kGenBVHLeafNodesGroupSize));
+    mpLeafNodeGenerator = ComputePass::create(kGenBVHLeafNodesFile, "genBVHLeafNodes", leafGeneratorDefines);
+
+    mpGpuSorter = BitonicSort::create();
+
     // Create ray tracing program.
     RtProgram::Desc progDesc;
-    progDesc.addShaderLibrary(kShaderFile).setRayGen("rayGen");
+    progDesc.addShaderLibrary(kULGTracerFile).setRayGen("rayGen");
     progDesc.addHitGroup(kRayTypeScatter, "scatterClosestHit", "scatterAnyHit").addMiss(kRayTypeScatter, "scatterMiss");
     progDesc.addHitGroup(kRayTypeShadow, "", "shadowAnyHit").addMiss(kRayTypeShadow, "shadowMiss");
     progDesc.addDefine("MAX_BOUNCES", std::to_string(mSharedParams.maxBounces));
@@ -89,12 +101,37 @@ UniformLightGrid::UniformLightGrid(const Dictionary& dict)
     mULGTracer.pProgram = RtProgram::create(progDesc, kMaxPayloadSizeBytes, kMaxAttributesSizeBytes);
 }
 
+void UniformLightGrid::generateBVHLeafNodes(RenderContext* pRenderContext)
+{
+    auto var = mpLeafNodeGenerator->getRootVar()["PerFrameCB"];
+
+    uint32_t emissiveTriangleCount = mpScene->getLightCollection(pRenderContext)->getTotalLightCount();
+    if (!mpBVHLeafNodesBuffer || mpBVHLeafNodesBuffer->getElementCount() < emissiveTriangleCount)
+    {
+        mpBVHLeafNodesBuffer = Buffer::createStructured(mpLeafNodeGenerator->getRootVar()["gLeafNodes"], emissiveTriangleCount, Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false);
+        mpBVHLeafNodesBuffer->setName("ULG::mpBVHLeafNodesBuffer");
+    }
+
+    const auto& sceneBound = mpScene->getSceneBounds();
+
+    mpScene->getLightCollection(pRenderContext)->setShaderData(var["gLights"]);
+    var["emissiveTriangleCount"] = emissiveTriangleCount;
+    var["quantLevels"] = 1024; // TODO: make as variable
+    var["sceneBound"]["minPoint"] = sceneBound.minPoint;
+    var["sceneBound"]["maxPoint"] = sceneBound.maxPoint;
+    mpLeafNodeGenerator->getRootVar()["gLeafNodes"] = mpBVHLeafNodesBuffer;
+
+    PROFILE("ULG_generateLeafNode");
+    mpLeafNodeGenerator->execute(pRenderContext, emissiveTriangleCount, 1, 1);
+}
+
 void UniformLightGrid::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)
 {
     PathTracer::setScene(pRenderContext, pScene);
 
     if (pScene)
     {
+        mpLeafNodeGenerator->getProgram()->addDefines(mpScene->getSceneDefines());
         mULGTracer.pProgram->addDefines(pScene->getSceneDefines());
     }
 }
@@ -103,6 +140,12 @@ void UniformLightGrid::execute(RenderContext* pRenderContext, const RenderData& 
 {
     // Call shared pre-render code.
     if (!beginFrame(pRenderContext, renderData)) return;
+
+    // Generate BVH leaf nodes.
+    {
+        /*PROFILE("ULG_generateLeafNode");*/
+        generateBVHLeafNodes(pRenderContext);
+    }
 
     // Set compile-time constants.
     RtProgram::SharedPtr pProgram = mULGTracer.pProgram;
@@ -147,13 +190,9 @@ void UniformLightGrid::execute(RenderContext* pRenderContext, const RenderData& 
     mpPixelDebug->prepareProgram(pProgram, mULGTracer.pVars->getRootVar());
     mpPixelStats->prepareProgram(pProgram, mULGTracer.pVars->getRootVar());
 
-    // TODO: Tree construction
-
-    // TODO: Choose grids/lights
-
     // Spawn the rays.
     {
-        PROFILE("UniformLightGrid::execute()_RayTrace");
+        PROFILE("ULG_RayTrace");
         mpScene->raytrace(pRenderContext, mULGTracer.pProgram.get(), mULGTracer.pVars, uint3(targetDim, 1));
     }
 

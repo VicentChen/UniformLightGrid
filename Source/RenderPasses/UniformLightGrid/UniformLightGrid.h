@@ -28,6 +28,7 @@
 #pragma once
 #include "Falcor.h"
 #include "RenderPasses/Shared/PathTracer/PathTracer.h"
+#include "Utils/Algorithm/BitonicSort.h"
 
 using namespace Falcor;
 
@@ -56,11 +57,11 @@ public:
 private:
     UniformLightGrid(const Dictionary& dict);
 
-    void generateMortonCode() { /* TODO */ }
-    void sortLeafNodes() { /* TODO */ }
-    void constructBVHTree() { /* TODO */ }
+    void generateBVHLeafNodes(RenderContext* pRenderContext);
+    void sortLeafNodes(RenderContext* pRenderContext) { /* TODO */ }
+    void constructBVHTree(RenderContext* pRenderContext) { /* TODO */ }
 
-    void chooseGridsAndLights() { /* TODO */ }
+    void chooseGridsAndLights(RenderContext* pRenderContext) { /* TODO */ }
 
     void recreateVars() override { mULGTracer.pVars = nullptr; }
     void prepareVars();
@@ -73,4 +74,10 @@ private:
         RtProgramVars::SharedPtr pVars;
         ParameterBlock::SharedPtr pParameterBlock;      ///< ParameterBlock for all data.
     } mULGTracer;
+
+    Buffer::SharedPtr mpBVHLeafNodesBuffer;
+    Buffer::SharedPtr mpBVHInternalNodesBuffer;
+    ComputePass::SharedPtr mpLeafNodeGenerator;
+
+    BitonicSort::SharedPtr mpGpuSorter;
 };
