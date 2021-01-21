@@ -59,7 +59,7 @@ private:
 
     void generateBVHLeafNodes(RenderContext* pRenderContext);
     void sortLeafNodes(RenderContext* pRenderContext);
-    void constructBVHTree(RenderContext* pRenderContext) { /* TODO */ }
+    void constructBVHTree(RenderContext* pRenderContext);
 
     void chooseGridsAndLights(RenderContext* pRenderContext) { /* TODO */ }
 
@@ -75,8 +75,12 @@ private:
         ParameterBlock::SharedPtr pParameterBlock;      ///< ParameterBlock for all data.
     } mULGTracer;
 
+    // leaf node data
     Buffer::SharedPtr mpBVHLeafNodesBuffer;
     Buffer::SharedPtr mpBVHLeafNodesHelperBuffer;
-    Buffer::SharedPtr mpBVHInternalNodesBuffer;
     ComputePass::SharedPtr mpLeafNodeGenerator;
+
+    // internal node data
+    Buffer::SharedPtr mpBVHInternalNodesBuffer;
+    ComputePass::SharedPtr mpBVHConstructor;
 };

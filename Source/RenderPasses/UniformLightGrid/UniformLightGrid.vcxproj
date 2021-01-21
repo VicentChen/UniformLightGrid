@@ -36,8 +36,8 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
-    <ShaderSource Include="BVH.slang" />
     <ShaderSource Include="BVHNodeData.slangh" />
+    <ShaderSource Include="constructBVH.cs.slang" />
   </ItemGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>

@@ -34,12 +34,13 @@
 namespace
 {
     const char kGenBVHLeafNodesFile[] = "RenderPasses/UniformLightGrid/GenBVHLeafNodes.cs.slang";
+    const char kConstructBVHFile[] = "RenderPasses/UniformLightGrid/constructBVH.cs.slang";
     const char kULGTracerFile[] = "RenderPasses/UniformLightGrid/ULGTracer.rt.slang";
 
     const char kParameterBlockName[] = "gData";
 
-    // Leaf node settings
-    const uint32_t kGenBVHLeafNodesGroupSize = 512;
+    // compute shader settings
+    const uint32_t kGroupSize = 512;
 
     // Ray tracing settings that affect the traversal stack size.
     // These should be set as small as possible.
@@ -83,10 +84,17 @@ UniformLightGrid::SharedPtr UniformLightGrid::create(RenderContext* pRenderConte
 UniformLightGrid::UniformLightGrid(const Dictionary& dict)
     : PathTracer(dict, kOutputChannels)
 {
-    // Create leaf nodes generating program
-    Program::DefineList leafGeneratorDefines;
-    leafGeneratorDefines.add("GROUP_SIZE", std::to_string(kGenBVHLeafNodesGroupSize));
-    mpLeafNodeGenerator = ComputePass::create(kGenBVHLeafNodesFile, "genBVHLeafNodes", leafGeneratorDefines);
+    { // Create leaf nodes generating program
+        Program::DefineList leafGeneratorDefines;
+        leafGeneratorDefines.add("GROUP_SIZE", std::to_string(kGroupSize));
+        mpLeafNodeGenerator = ComputePass::create(kGenBVHLeafNodesFile, "genBVHLeafNodes", leafGeneratorDefines);
+    }
+
+    { // Create BVH construction program
+        Program::DefineList BVHConstructorDefines;
+        BVHConstructorDefines.add("GROUP_SIZE", std::to_string(kGroupSize));
+        mpBVHConstructor = ComputePass::create(kConstructBVHFile, "constructBVH", BVHConstructorDefines);
+    }
 
     // Create ray tracing program.
     RtProgram::Desc progDesc;
@@ -101,8 +109,6 @@ UniformLightGrid::UniformLightGrid(const Dictionary& dict)
 
 void UniformLightGrid::generateBVHLeafNodes(RenderContext* pRenderContext)
 {
-    auto var = mpLeafNodeGenerator->getRootVar()["PerFrameCB"];
-
     uint32_t emissiveTriangleCount = mpScene->getLightCollection(pRenderContext)->getTotalLightCount();
     if (!mpBVHLeafNodesBuffer || mpBVHLeafNodesBuffer->getElementCount() < emissiveTriangleCount)
     {
@@ -115,6 +121,7 @@ void UniformLightGrid::generateBVHLeafNodes(RenderContext* pRenderContext)
 
     const auto& sceneBound = mpScene->getSceneBounds();
 
+    auto var = mpLeafNodeGenerator->getRootVar()["PerFrameCB"];
     mpScene->getLightCollection(pRenderContext)->setShaderData(var["gLights"]);
     var["emissiveTriangleCount"] = emissiveTriangleCount;
     var["quantLevels"] = 1024; // TODO: make as variable
@@ -147,6 +154,27 @@ void UniformLightGrid::sortLeafNodes(RenderContext* pRenderContext)
     pRenderContext->copyBufferRegion(mpBVHLeafNodesBuffer.get(), 0, mpBVHLeafNodesHelperBuffer.get(), 0, bufferSize);
 }
 
+void UniformLightGrid::constructBVHTree(RenderContext* pRenderContext)
+{
+    PROFILE("ULG_constructBVHTree");
+
+    uint32_t leafNodeCount = mpScene->getLightCollection(pRenderContext)->getTotalLightCount();
+    uint32_t internalNodeCount = leafNodeCount - 1;
+
+    if (!mpBVHInternalNodesBuffer || mpBVHInternalNodesBuffer->getElementCount() < internalNodeCount)
+    {
+        mpBVHInternalNodesBuffer = Buffer::createStructured(mpBVHConstructor->getRootVar()["gInternalNodes"], internalNodeCount, Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false);
+        mpBVHInternalNodesBuffer->setName("ULG::mpBVHInternalNodesBuffer");
+    }
+
+    auto var = mpBVHConstructor->getRootVar()["PerFrameCB"];
+    var["numLeafNodes"] = leafNodeCount;
+    mpBVHConstructor->getRootVar()["gLeafNodes"] = mpBVHLeafNodesBuffer;
+    mpBVHConstructor->getRootVar()["gInternalNodes"] = mpBVHInternalNodesBuffer;
+
+    mpBVHConstructor->execute(pRenderContext, internalNodeCount, 1, 1);
+}
+
 void UniformLightGrid::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)
 {
     PathTracer::setScene(pRenderContext, pScene);
@@ -166,6 +194,7 @@ void UniformLightGrid::execute(RenderContext* pRenderContext, const RenderData& 
     // ----- Uniform Light Grid Codes ----- //
     generateBVHLeafNodes(pRenderContext);
     sortLeafNodes(pRenderContext);
+    constructBVHTree(pRenderContext);
 
     // ----- Uniform Light Grid Codes ----- //
 
