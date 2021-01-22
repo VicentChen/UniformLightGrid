@@ -10,8 +10,9 @@ struct InternalNode
     uint lChildId = 0;
     uint rChildId = 0;
     uint splitPoint = 0;
-    uint commonPrefix = 0;
+    uint commonPrefix = 0; // TODO: remove this
     uint2 range = uint2(0, 0);
+    float3 intensity = float3(0, 0, 0);
 
 #ifdef HOST_CODE
     bool getIsLChildLeaf() { return isLChildLeaf; }
@@ -34,5 +35,6 @@ struct LeafNode
 {
     uint mortonCode = 0;
     uint triangleIdx = 0;
-    float3 debug = float3(0, 0, 0);
+    float3 intensity = float3(0, 0, 0);
+    float4 debug = float4(0, 0, 0, 0);
 };

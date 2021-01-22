@@ -38,6 +38,11 @@
   <ItemGroup>
     <ShaderSource Include="BVHNodeData.slangh" />
     <ShaderSource Include="constructBVH.cs.slang" />
+    <ShaderSource Include="EmissiveULGSampler.slang" />
+    <ShaderSource Include="genBVHLeafNodes.cs.slang" />
+    <ShaderSource Include="ULGTracer.rt.slang" />
+    <ShaderSource Include="ULGTracer.slang" />
+    <ShaderSource Include="ULGTracerHelpers.slang" />
   </ItemGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>

@@ -33,7 +33,7 @@
 
 namespace
 {
-    const char kGenBVHLeafNodesFile[] = "RenderPasses/UniformLightGrid/GenBVHLeafNodes.cs.slang";
+    const char kGenBVHLeafNodesFile[] = "RenderPasses/UniformLightGrid/genBVHLeafNodes.cs.slang";
     const char kConstructBVHFile[] = "RenderPasses/UniformLightGrid/constructBVH.cs.slang";
     const char kULGTracerFile[] = "RenderPasses/UniformLightGrid/ULGTracer.rt.slang";
 
@@ -84,12 +84,6 @@ UniformLightGrid::SharedPtr UniformLightGrid::create(RenderContext* pRenderConte
 UniformLightGrid::UniformLightGrid(const Dictionary& dict)
     : PathTracer(dict, kOutputChannels)
 {
-    { // Create leaf nodes generating program
-        Program::DefineList leafGeneratorDefines;
-        leafGeneratorDefines.add("GROUP_SIZE", std::to_string(kGroupSize));
-        mpLeafNodeGenerator = ComputePass::create(kGenBVHLeafNodesFile, "genBVHLeafNodes", leafGeneratorDefines);
-    }
-
     { // Create BVH construction program
         Program::DefineList BVHConstructorDefines;
         BVHConstructorDefines.add("GROUP_SIZE", std::to_string(kGroupSize));
@@ -109,6 +103,18 @@ UniformLightGrid::UniformLightGrid(const Dictionary& dict)
 
 void UniformLightGrid::generateBVHLeafNodes(RenderContext* pRenderContext)
 {
+    PROFILE("ULG_generateBVHLeafNodes");
+
+    // TODO: find a better place for program creation
+    // Create leaf nodes generating program
+    if (mpLeafNodeGenerator == nullptr)
+    {
+        assert(mpScene);
+        Program::DefineList leafGeneratorDefines = mpScene->getSceneDefines();
+        leafGeneratorDefines.add("GROUP_SIZE", std::to_string(kGroupSize));
+        mpLeafNodeGenerator = ComputePass::create(kGenBVHLeafNodesFile, "genBVHLeafNodes", leafGeneratorDefines);
+    }
+
     uint32_t emissiveTriangleCount = mpScene->getLightCollection(pRenderContext)->getTotalLightCount();
     if (!mpBVHLeafNodesBuffer || mpBVHLeafNodesBuffer->getElementCount() < emissiveTriangleCount)
     {
@@ -121,15 +127,14 @@ void UniformLightGrid::generateBVHLeafNodes(RenderContext* pRenderContext)
 
     const auto& sceneBound = mpScene->getSceneBounds();
 
+    mpLeafNodeGenerator.getRootVar()["gScene"] = mpScene->getParameterBlock();
     auto var = mpLeafNodeGenerator->getRootVar()["PerFrameCB"];
-    mpScene->getLightCollection(pRenderContext)->setShaderData(var["gLights"]);
     var["emissiveTriangleCount"] = emissiveTriangleCount;
     var["quantLevels"] = 1024; // TODO: make as variable
     var["sceneBound"]["minPoint"] = sceneBound.minPoint;
     var["sceneBound"]["maxPoint"] = sceneBound.maxPoint;
     mpLeafNodeGenerator->getRootVar()["gLeafNodes"] = mpBVHLeafNodesBuffer;
 
-    PROFILE("ULG_generateBVHLeafNodes");
     mpLeafNodeGenerator->execute(pRenderContext, emissiveTriangleCount, 1, 1);
 }
 
@@ -181,7 +186,6 @@ void UniformLightGrid::setScene(RenderContext* pRenderContext, const Scene::Shar
 
     if (pScene)
     {
-        mpLeafNodeGenerator->getProgram()->addDefines(mpScene->getSceneDefines());
         mULGTracer.pProgram->addDefines(pScene->getSceneDefines());
     }
 }
