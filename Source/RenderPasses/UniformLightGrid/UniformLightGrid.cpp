@@ -33,8 +33,8 @@
 
 namespace
 {
-    const char kGenBVHLeafNodesFile[] = "RenderPasses/UniformLightGrid/genBVHLeafNodes.cs.slang";
-    const char kConstructBVHFile[] = "RenderPasses/UniformLightGrid/constructBVH.cs.slang";
+    const char kGenBVHLeafNodesFile[] = "RenderPasses/UniformLightGrid/GenBVHLeafNodes.cs.slang";
+    const char kConstructBVHFile[] = "RenderPasses/UniformLightGrid/ConstructBVH.cs.slang";
     const char kULGTracerFile[] = "RenderPasses/UniformLightGrid/ULGTracer.rt.slang";
 
     const char kParameterBlockName[] = "gData";
