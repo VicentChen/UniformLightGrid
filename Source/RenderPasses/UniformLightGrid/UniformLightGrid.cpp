@@ -35,12 +35,16 @@ namespace
 {
     const char kGenBVHLeafNodesFile[] = "RenderPasses/UniformLightGrid/GenBVHLeafNodes.cs.slang";
     const char kConstructBVHFile[] = "RenderPasses/UniformLightGrid/ConstructBVH.cs.slang";
+    const char kGridAndLightSelectorFile[] = "RenderPasses/UniformLightGrid/SelectGridAndLight.cs.slang";
     const char kULGTracerFile[] = "RenderPasses/UniformLightGrid/ULGTracer.rt.slang";
 
     const char kParameterBlockName[] = "gData";
 
     // compute shader settings
+    const uint32_t kQuantLevels = 1024; // TODO: make as variable
+    const uint32_t kGridMortonCodePrefixLength = 27; // TODO: make as variable
     const uint32_t kGroupSize = 512;
+    const uint32_t kChunkSize = 16;
 
     // Ray tracing settings that affect the traversal stack size.
     // These should be set as small as possible.
@@ -50,12 +54,15 @@ namespace
     const uint32_t kMaxAttributesSizeBytes = 8;
     const uint32_t kMaxRecursionDepth = 1;
 
+    // Render pass internal channels.
+    const std::string kLightIndexInternal = "lightIndex";
+
     // Render pass output channels.
     const std::string kColorOutput = "color";
     const std::string kAlbedoOutput = "albedo";
     const std::string kTimeOutput = "time";
 
-    const Falcor::ChannelList kOutputChannels =
+    const ChannelList kOutputChannels =
     {
         { kColorOutput,     "gOutputColor",               "Output color (linear)", true /* optional */                              },
         { kAlbedoOutput,    "gOutputAlbedo",              "Surface albedo (base color) or background color", true /* optional */    },
@@ -101,6 +108,16 @@ UniformLightGrid::UniformLightGrid(const Dictionary& dict)
     mULGTracer.pProgram = RtProgram::create(progDesc, kMaxPayloadSizeBytes, kMaxAttributesSizeBytes);
 }
 
+AABB UniformLightGrid::sceneBoundHelper()
+{
+    const auto& sceneBound = mpScene->getSceneBounds();
+    AABB hackedSceneBound = sceneBound;
+    auto extent = hackedSceneBound.extent();
+    float maxExtent = std::max(extent.x, std::max(extent.y, extent.z));
+    hackedSceneBound.maxPoint = hackedSceneBound.maxPoint + float3(maxExtent, maxExtent, maxExtent);
+    return hackedSceneBound;
+}
+
 void UniformLightGrid::generateBVHLeafNodes(RenderContext* pRenderContext)
 {
     PROFILE("ULG_generateBVHLeafNodes");
@@ -125,12 +142,14 @@ void UniformLightGrid::generateBVHLeafNodes(RenderContext* pRenderContext)
         mpBVHLeafNodesHelperBuffer->setName("ULG::mpBVHLeafNodesHelperBuffer");
     }
 
-    const auto& sceneBound = mpScene->getSceneBounds();
+    // TODO: do we have better way to get scene bound?
+    //const auto& sceneBound = mpScene->getSceneBounds();
+    auto sceneBound = sceneBoundHelper();
 
     mpLeafNodeGenerator.getRootVar()["gScene"] = mpScene->getParameterBlock();
     auto var = mpLeafNodeGenerator->getRootVar()["PerFrameCB"];
     var["emissiveTriangleCount"] = emissiveTriangleCount;
-    var["quantLevels"] = 1024; // TODO: make as variable
+    var["quantLevels"] = kQuantLevels;
     var["sceneBound"]["minPoint"] = sceneBound.minPoint;
     var["sceneBound"]["maxPoint"] = sceneBound.maxPoint;
     mpLeafNodeGenerator->getRootVar()["gLeafNodes"] = mpBVHLeafNodesBuffer;
@@ -180,6 +199,63 @@ void UniformLightGrid::constructBVHTree(RenderContext* pRenderContext)
     mpBVHConstructor->execute(pRenderContext, internalNodeCount, 1, 1);
 }
 
+void UniformLightGrid::chooseGridsAndLights(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    PROFILE("ULG_chooseGridAndLight");
+
+    // TODO: find a better place for program creation
+    // Create grid and light selector program
+    if (mpGridAndLightSelector == nullptr)
+    {
+        assert(mpScene);
+        Program::DefineList gridAndLightSelectorDefines = mpScene->getSceneDefines();
+        gridAndLightSelectorDefines.add("CHUNK_SIZE", std::to_string(kChunkSize));
+        gridAndLightSelectorDefines.add(getValidResourceDefines(mInputChannels, renderData)); // We need `loadShadingData`, which uses input channels
+        gridAndLightSelectorDefines.add(mpSampleGenerator->getDefines()); // We need `SampleGenerator`
+        mpGridAndLightSelector = ComputePass::create(kGridAndLightSelectorFile, "selectGridAndLight", gridAndLightSelectorDefines);
+        setStaticParams(mpGridAndLightSelector->getProgram().get()); // TODO: reduce defines
+    }
+
+    Texture::SharedPtr pLightIndexTexture = renderData[kLightIndexInternal]->asTexture();
+
+    // TODO: do we have better way to get scene bound?
+    //const auto& sceneBound = mpScene->getSceneBounds();
+    auto sceneBound = sceneBoundHelper();
+
+    // Add missed channels here
+    // TODO: replace string literal to constant variables
+        // Bind I/O buffers. These needs to be done per-frame as the buffers may change anytime.
+    auto bind = [&](const ChannelDesc& desc)
+    {
+        if (!desc.texname.empty())
+        {
+            auto pGlobalVars = mpGridAndLightSelector.getRootVar();
+            pGlobalVars[desc.texname] = renderData[desc.name]->asTexture();
+        }
+    };
+    for (auto channel : mInputChannels) bind(channel);
+    //mpGridAndLightSelector.getRootVar()["gWorldView"] = renderData["viewW"]->asTexture();
+    //mpGridAndLightSelector.getRootVar()["gWorldShadingTangent"] = renderData["tangentW"]->asTexture();
+    //mpGridAndLightSelector.getRootVar()["gVBuffer"] = renderData["vbuffer"]->asTexture();
+
+    mpGridAndLightSelector.getRootVar()["gLightIndex"] = pLightIndexTexture;
+    mpGridAndLightSelector.getRootVar()["gScene"] = mpScene->getParameterBlock();
+    mpGridAndLightSelector.getRootVar()["gLeafNodes"] = mpBVHLeafNodesBuffer;
+    mpGridAndLightSelector.getRootVar()["gInternalNodes"] = mpBVHInternalNodesBuffer;
+
+    auto var = mpGridAndLightSelector.getRootVar()["PerFrameCB"];
+    var["dispatchDim"] = mSharedParams.frameDim;
+    var["frameCount"] = mSharedParams.frameCount;
+    var["minDistance"] = mMinDistanceOfGirdSelection;
+    var["samplesPerDirection"] = mSamplesPerDirection;
+    mpGridAndLightSelector.getRootVar()["PerFrameBVHCB"]["gridMortonCodePrefixLength"] = kGridMortonCodePrefixLength;
+    mpGridAndLightSelector.getRootVar()["PerFrameBVHCB"]["quantLevels"] = kQuantLevels;
+    mpGridAndLightSelector.getRootVar()["PerFrameBVHCB"]["sceneBound"]["minPoint"] = sceneBound.minPoint;
+    mpGridAndLightSelector.getRootVar()["PerFrameBVHCB"]["sceneBound"]["maxPoint"] = sceneBound.maxPoint;
+
+    mpGridAndLightSelector->execute(pRenderContext, uint3(mSharedParams.frameDim, 1));
+}
+
 void UniformLightGrid::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)
 {
     PathTracer::setScene(pRenderContext, pScene);
@@ -188,6 +264,18 @@ void UniformLightGrid::setScene(RenderContext* pRenderContext, const Scene::Shar
     {
         mULGTracer.pProgram->addDefines(pScene->getSceneDefines());
     }
+}
+
+RenderPassReflection UniformLightGrid::reflect(const CompileData& compileData)
+{
+    auto reflector = PathTracer::reflect(compileData);
+
+    // TODO: find a place to clear this texture
+    reflector.addInternal(kLightIndexInternal, "Light index")
+        .format(ResourceFormat::RGBA32Float)
+        .bindFlags(ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
+
+    return reflector;
 }
 
 void UniformLightGrid::execute(RenderContext* pRenderContext, const RenderData& renderData)
@@ -199,6 +287,8 @@ void UniformLightGrid::execute(RenderContext* pRenderContext, const RenderData& 
     generateBVHLeafNodes(pRenderContext);
     sortLeafNodes(pRenderContext);
     constructBVHTree(pRenderContext);
+
+    chooseGridsAndLights(pRenderContext, renderData);
 
     // ----- Uniform Light Grid Codes ----- //
 
@@ -238,6 +328,10 @@ void UniformLightGrid::execute(RenderContext* pRenderContext, const RenderData& 
     for (auto channel : mInputChannels) bind(channel);
     for (auto channel : mOutputChannels) bind(channel);
 
+    // ----- Uniform Light Grid Codes ----- //
+    mULGTracer.pVars.getRootVar()["gLightIndex"] = renderData[kLightIndexInternal]->asTexture();
+    // ----- Uniform Light Grid Codes ----- //
+
     // Get dimensions of ray dispatch.
     const uint2 targetDim = renderData.getDefaultTextureDims();
     assert(targetDim.x > 0 && targetDim.y > 0);
@@ -253,6 +347,17 @@ void UniformLightGrid::execute(RenderContext* pRenderContext, const RenderData& 
 
     // Call shared post-render code.
     endFrame(pRenderContext, renderData);
+}
+
+void UniformLightGrid::renderUI(Gui::Widgets& widget)
+{
+    widget.text("");
+    widget.var("min distance of grid selection", mMinDistanceOfGirdSelection, 0.01f, 1.0f, 0.01f);
+    widget.text("");
+    widget.var("grid samples per direction", mSamplesPerDirection, 1u, 64u, 1u);
+    widget.text("");
+
+    PathTracer::renderUI(widget);
 }
 
 void UniformLightGrid::prepareVars()

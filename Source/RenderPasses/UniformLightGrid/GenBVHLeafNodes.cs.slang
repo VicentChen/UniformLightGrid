@@ -41,7 +41,7 @@ void genBVHLeafNodes(uint3 dispatchThreadId : SV_DispatchThreadID)
     node.mortonCode = mortonCode;
     node.triangleIdx = threadId;
     node.intensity = emissive * area;
-    node.debug = float4(emissive, area);
+    node.debug = float4(triangleCenter, area);
 
     gLeafNodes[threadId] = node;
 }

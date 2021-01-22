@@ -50,18 +50,22 @@ public:
 
     virtual std::string getDesc() override { return sDesc; }
     virtual void setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene) override;
+    RenderPassReflection reflect(const CompileData& compileData) override;
     virtual void execute(RenderContext* pRenderContext, const RenderData& renderData) override;
+    void renderUI(Gui::Widgets& widget) override;
 
     static const char* sDesc;
 
 private:
     UniformLightGrid(const Dictionary& dict);
 
+    AABB sceneBoundHelper();
+
     void generateBVHLeafNodes(RenderContext* pRenderContext);
     void sortLeafNodes(RenderContext* pRenderContext);
     void constructBVHTree(RenderContext* pRenderContext);
 
-    void chooseGridsAndLights(RenderContext* pRenderContext) { /* TODO */ }
+    void chooseGridsAndLights(RenderContext* pRenderContext, const RenderData& renderData);
 
     void recreateVars() override { mULGTracer.pVars = nullptr; }
     void prepareVars();
@@ -83,4 +87,9 @@ private:
     // internal node data
     Buffer::SharedPtr mpBVHInternalNodesBuffer;
     ComputePass::SharedPtr mpBVHConstructor;
+
+    // grid and light selection data
+    float mMinDistanceOfGirdSelection = 0.1f;
+    uint mSamplesPerDirection = 8;
+    ComputePass::SharedPtr mpGridAndLightSelector;
 };

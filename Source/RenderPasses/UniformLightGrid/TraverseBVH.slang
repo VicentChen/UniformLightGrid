@@ -6,7 +6,7 @@ import Utils.Math.BitTricks;
 StructuredBuffer<LeafNode> gLeafNodes;
 StructuredBuffer<InternalNode> gInternalNodes;
 
-cbuffer PerFrameCB
+cbuffer PerFrameBVHCB
 {
     uint gridMortonCodePrefixLength;
     uint quantLevels; // morton code dimension
@@ -29,65 +29,72 @@ float3 computePosByMortonCode(uint mortonCode)
     return (minPos + maxPos) * 0.5f;
 }
 
-void buildGrid(in uint rootNode, in bool isLeafNode, out Grid grid)
+void buildGridByInternalNode(in uint rootNode, out UniformGrid grid)
 {
     grid.rootNode = rootNode;
-    grid.isLeafNode = isLeafNode;
+    grid.isLeafNode = false;
 
-    if (isLeafNode)
-    {
-        LeafNode node = gLeafNodes[rootNode];
-        grid.pos = computePosByMortonCode(node.mortonCode);
-        grid.intensity = node.intensity;
-        grid.range = uint2(rootNode, rootNode);
-    }
-    else
-    {
-        InternalNode node = gInternalNodes[rootNode];
-        grid.pos = computePosByMortonCode(node.splitMortonCode);
-        grid.intensity = node.intensity;
-        grid.range = node.range;
-    }
+    InternalNode node = gInternalNodes[rootNode];
+    grid.pos = computePosByMortonCode(node.splitMortonCode);
+    grid.intensity = node.intensity;
+    grid.range = node.range;
+}
+
+void buildGridByLeafNode(in uint rootNode, out UniformGrid grid)
+{
+    grid.rootNode = rootNode;
+    grid.isLeafNode = true;
+
+    LeafNode node = gLeafNodes[rootNode];
+    grid.pos = computePosByMortonCode(node.mortonCode);
+    grid.intensity = node.intensity;
+    grid.range = uint2(rootNode, rootNode);
 }
 
 /** Choose a nearest grid from BVH
     \param[in] morton code of current grid
     \return nearest grid
 */
-Grid traverseTreeForGird(uint mortonCode)
+UniformGrid traverseTreeForGird(uint mortonCode)
 {
-    Grid grid = {};
+    UniformGrid grid = {};
     uint currNodeId = 0;
     InternalNode currNode = gInternalNodes[currNodeId];
+
     while (true)
     {
         // stop if current node size > grid size
         // we have 32-bit integer and 30-bit morton code
         if (currNode.commonPrefixLength > gridMortonCodePrefixLength + 2)
         {
-            buildGrid(currNodeId, false, grid);
+            buildGridByInternalNode(currNodeId, grid);
             break;
         }
+
+        uint lChild = currNode.lChildId;
+        bool isLChildLeaf = currNode.isLChildLeaf;
+        uint rChild = currNode.rChildId;
+        bool isRChildLeaf = currNode.isRChildLeaf;
 
         // choose one child
         bool isLeaf = false;
         if (mortonCode <= currNode.splitMortonCode)
         {
             // Left child
-            currNodeId = currNode.lChildId;
-            isLeaf = currNode.isLChildLeaf;
+            currNodeId = lChild;
+            isLeaf = isLChildLeaf;
         }
         else
         {
             // Right child
-            currNodeId = currNode.rChildId;
-            isLeaf = currNode.isRChildLeaf;
+            currNodeId = rChild;
+            isLeaf = isRChildLeaf;
         }
 
         // stop if child is leaf
         if (isLeaf)
         {
-            buildGrid(currNodeId, true, grid);
+            buildGridByLeafNode(currNodeId, grid);
             break;
         }
         else
@@ -98,6 +105,55 @@ Grid traverseTreeForGird(uint mortonCode)
 
     return grid;
 }
+
+// /** Choose a nearest grid from BVH
+//     \param[in] morton code of current grid
+//     \return nearest grid
+// */
+// UniformGrid traverseTreeForGird(uint mortonCode)
+// {
+//     UniformGrid grid = {};
+//     uint currNodeId = 0;
+//     InternalNode currNode = gInternalNodes[currNodeId];
+//     while (true)
+//     {
+//         // stop if current node size > grid size
+//         // we have 32-bit integer and 30-bit morton code
+//         if (currNode.commonPrefixLength >= gridMortonCodePrefixLength + 2)
+//         {
+//             buildGridByInternalNode(currNodeId, grid);
+//             break;
+//         }
+
+//         // choose one child
+//         bool isLeaf = false;
+//         if (mortonCode <= currNode.splitMortonCode)
+//         {
+//             // Left child
+//             currNodeId = currNode.lChildId;
+//             isLeaf = currNode.isLChildLeaf;
+//         }
+//         else
+//         {
+//             // Right child
+//             currNodeId = currNode.rChildId;
+//             isLeaf = currNode.isRChildLeaf;
+//         }
+
+//         // stop if child is leaf
+//         if (isLeaf)
+//         {
+//             buildGridByLeafNode(currNodeId, grid);
+//             break;
+//         }
+//         else
+//         {
+//             currNode = gInternalNodes[currNodeId];
+//         }
+//     }
+
+//     return grid;
+// }
 
 /** Choose a light from BVH
     \param[in] staring node for traversal

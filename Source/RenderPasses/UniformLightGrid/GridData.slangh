@@ -1,7 +1,7 @@
 #pragma once
 #include "Utils/HostDeviceShared.slangh"
 
-struct Grid
+struct UniformGrid
 {
     float3 pos = float3(0, 0, 0);
     float3 intensity = float3(0, 0, 0);

@@ -16,7 +16,7 @@ __exported import RenderPasses.Shared.PathTracer.PathTracerHelpers;
 __exported import Utils.Sampling.SampleGeneratorInterface;
 
 // TODO: add textures
-// Texture2D<float4> gSelectedLights;
+Texture2D<float4> gLightIndex;
 // TODO:
 //   In sampleULGSceneLights:
 //     1. replace `emissiveSampler` with `EmissiveULGSmapler`

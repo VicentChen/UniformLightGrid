@@ -44,7 +44,7 @@ uint2 determineRange(uint i)
     return uint2(i, edge);
 }
 
-uint findSplit(uint first, uint last, uint idx)
+uint findSplit(uint first, uint last)
 {
     // Identical Morton codes => split the range in the middle.
 
@@ -83,43 +83,6 @@ uint findSplit(uint first, uint last, uint idx)
     return split;
 }
 
-[numthreads(GROUP_SIZE, 1, 1)]
-void constructBVH(uint3 dispatchThreadId : SV_DispatchThreadID)
-{
-    uint idx = dispatchThreadId.x;
-    if (idx >= numLeafNodes - 1) return;
-    // Find out which range of objects the node corresponds to.
-    // (This is where the magic happens!)
-
-    InternalNode node = {};
-
-    uint2 range = determineRange(idx);
-    int first = range.x;
-    int last = range.y;
-    node.range = first > last ? uint2(last, first) : uint2(first, last);
-
-    node.setCommonPrefixLength(calcCommonPrefix(first, last)); // TODO: common prefix may overflow here
-    node.commonPrefix = gLeafNodes[first].mortonCode >> (31 - node.getCommonPrefixLength());
-
-    // Determine where to split the range.
-    int split = findSplit(first, last, idx);
-    node.splitMortonCode = gLeafNodes[split].mortonCode;
-
-    // Select Lchild.
-    node.lChildId = split;
-    node.setIsLChildLeaf(split == min(first, last));
-    // Select Rchild.
-    node.rChildId = split + 1;
-    node.setIsRChildLeaf(split + 1 == max(last, first));
-
-    float3 intensity = 0;
-    for (int i = node.range.x; i <= node.range.y; i++)
-        intensity += gLeafNodes[i].intensity;
-    node.intensity = intensity;
-
-    gInternalNodes[idx] = node;
-}
-
 // uint findSplit(uint first, uint last, uint idx)
 // {
 //     int nodePrefix = calcCommonPrefix(first, last);
@@ -139,3 +102,42 @@ void constructBVH(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 //     return idx + S * d + min(d, 0);
 // }
+
+[numthreads(GROUP_SIZE, 1, 1)]
+void constructBVH(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint idx = dispatchThreadId.x;
+    if (idx >= numLeafNodes - 1) return;
+    // Find out which range of objects the node corresponds to.
+    // (This is where the magic happens!)
+
+    InternalNode node = {};
+
+    uint2 range = determineRange(idx);
+    uint first = range.x;
+    uint last = range.y;
+    node.range = first > last ? uint2(last, first) : uint2(first, last);
+
+    node.setCommonPrefixLength(calcCommonPrefix(first, last)); // TODO: common prefix may overflow here
+    // node.commonPrefix = gLeafNodes[first].mortonCode >> (31 - node.getCommonPrefixLength());
+
+    // Determine where to split the range.
+    // uint split = findSplit(first, last, idx);
+    uint split = findSplit(node.range.x, node.range.y);
+    node.commonPrefix = split;
+    node.splitMortonCode = gLeafNodes[split].mortonCode;
+
+    // Select Lchild.
+    node.lChildId = split;
+    node.setIsLChildLeaf(split == min(first, last));
+    // Select Rchild.
+    node.rChildId = split + 1;
+    node.setIsRChildLeaf(split + 1 == max(last, first));
+
+    float3 intensity = 0;
+    for (uint i = node.range.x; i <= node.range.y; i++)
+        intensity += gLeafNodes[i].intensity;
+    node.intensity = intensity;
+
+    gInternalNodes[idx] = node;
+}
