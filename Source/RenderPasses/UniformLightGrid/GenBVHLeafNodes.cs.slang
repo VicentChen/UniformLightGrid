@@ -1,8 +1,8 @@
 #include "BVHNodeData.slangh"
 import Scene.Scene;
 import Experimental.Scene.Lights.LightCollection;
-import Utils.Math.BitTricks;
 import Utils.Math.AABB;
+import Utils.Math.BitTricks;
 
 #ifndef GROUP_SIZE
     // Compile-time error if GROUP_SIZE is not defined.

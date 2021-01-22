@@ -1,0 +1,12 @@
+#pragma once
+#include "Utils/HostDeviceShared.slangh"
+
+struct Grid
+{
+    float3 pos = float3(0, 0, 0);
+    float3 intensity = float3(0, 0, 0);
+    uint2 range = uint2(0, 0);
+
+    uint rootNode = 0; // TODO: rename
+    bool isLeafNode = false;
+};

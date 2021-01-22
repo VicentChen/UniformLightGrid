@@ -103,7 +103,7 @@ void constructBVH(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     // Determine where to split the range.
     int split = findSplit(first, last, idx);
-    node.splitPoint = split;
+    node.splitMortonCode = gLeafNodes[split].mortonCode;
 
     // Select Lchild.
     node.lChildId = split;
