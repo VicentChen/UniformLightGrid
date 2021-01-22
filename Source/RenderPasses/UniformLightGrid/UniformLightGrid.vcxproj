@@ -37,9 +37,9 @@
   </ItemGroup>
   <ItemGroup>
     <ShaderSource Include="BVHNodeData.slangh" />
-    <ShaderSource Include="constructBVH.cs.slang" />
+    <ShaderSource Include="ConstructBVH.cs.slang" />
     <ShaderSource Include="EmissiveULGSampler.slang" />
-    <ShaderSource Include="genBVHLeafNodes.cs.slang" />
+    <ShaderSource Include="GenBVHLeafNodes.cs.slang" />
     <ShaderSource Include="ULGTracer.rt.slang" />
     <ShaderSource Include="ULGTracer.slang" />
     <ShaderSource Include="ULGTracerHelpers.slang" />
