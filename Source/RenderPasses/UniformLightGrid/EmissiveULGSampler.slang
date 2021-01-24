@@ -32,40 +32,31 @@ import Utils.Sampling.SampleGeneratorInterface;
 import Experimental.Scene.Lights.EmissiveLightSamplerHelpers;
 import Experimental.Scene.Lights.EmissiveLightSamplerInterface;
 
-/** Emissive light sampler using uniform sampling of the emissive triangles.
-
-    The sampler implements the IEmissiveLightSampler interface (see
-    EmissiveLightSamplerInterface.slang for usage information).
+/** Emissive light sampler using provided index of the emissive triangles.
 
     The struct wraps a LightCollection that stores the pre-processed lights.
     The program should instantiate the struct below. See EmissiveLightSampler.slang.
 */
-struct EmissiveULGSampler : IEmissiveLightSampler
+struct EmissiveULGSampler
 {
-    uint4 _dummy;   ///< Dummy data necessary to have EmissiveUniformSampler as member on another struct.
+    uint4 _dummy;   ///< Dummy data necessary to have EmissiveULGSampler as member on another struct.
 
     /** Draw a single light sample.
         \param[in] posW Shading point in world space.
         \param[in] normalW Normal at the shading point in world space.
-        \param[in] triangleIndex chosen triangle.
+        \param[in] triangleIndex Chosen triangle.
+        \param[in] trianglePdf Pdf of chosen triangle.
         \param[in] onSurface True if only upper hemisphere should be considered.
         \param[in,out] sg Sample generator.
         \param[out] ls Light sample. Only valid if true is returned.
         \return True if a sample was generated, false otherwise.
     */
-    bool sampleLight<S : ISampleGenerator>(const float3 posW, const float3 normalW, const uint triangleIndex, const bool onSurface, inout S sg, out TriangleLightSample ls)
+    bool sampleLight<S : ISampleGenerator>(const float3 posW, const float3 normalW, const uint triangleIndex, const float trianglePdf, const bool onSurface, inout S sg, out TriangleLightSample ls)
     {
         // TODO: are we selecting active triangles?
-        // if (gScene.lightCollection.getActiveTriangleCount() == 0) return false;
-
-        // Randomly pick a triangle out of the global list of active triangles with uniform probability.
-        // float uLight = sampleNext1D(sg);
-        // uint triangleCount = gScene.lightCollection.getActiveTriangleCount();
-        // uint idx = min((uint)(uLight * triangleCount), triangleCount - 1); // Safety precaution as the result of the multiplication may be rounded to triangleCount even if uLight < 1.0 when triangleCount is large.
-        // uint triangleIndex = gScene.lightCollection.activeTriangles[idx];
 
         uint triangleCount = gScene.lightCollection.getTriangleCount();
-        float triangleSelectionPdf = 1.f / (float)triangleCount;
+        float triangleSelectionPdf = trianglePdf; // caller will provide pdf, original pdf = 1.f / (float)triangleCount;
 
         // Sample the triangle uniformly.
         float2 u = sampleNext2D(sg);

@@ -92,4 +92,8 @@ private:
     float mMinDistanceOfGirdSelection = 0.1f;
     uint mSamplesPerDirection = 8;
     ComputePass::SharedPtr mpGridAndLightSelector;
+
+    // TODO: add a struct for ULG parameters
+    // hack output color
+    float mAmplifyCofficient = 1.0f;
 };

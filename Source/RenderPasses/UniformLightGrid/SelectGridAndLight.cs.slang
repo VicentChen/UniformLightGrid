@@ -111,6 +111,7 @@ void selectGridAndLight(uint3 dispatchThreadId : SV_DispatchThreadID)
         float3 pos = sd.posW;
 
         // compute direction by bsdf
+        // TODO: randomly choose direction
         BSDFSample bsdfSample;
         sampleBSDF(sd, sg, bsdfSample);
         float3 dir = bsdfSample.wi;
@@ -121,9 +122,6 @@ void selectGridAndLight(uint3 dispatchThreadId : SV_DispatchThreadID)
         UniformGrid chosenGrid = {};
         float3 chosenGridBSDF = 0;
         float chosenGridDistance = 0;
-        uint chosenGridMortonCode = 0;
-        // float chosenGridPdf = 1.0f;
-        // float chosenGridWeight = 0.0f;
         float weightSum = 0;
         for (int dirSampleIdx = 0; dirSampleIdx < samplesPerDirection; dirSampleIdx++)
         {
@@ -151,17 +149,7 @@ void selectGridAndLight(uint3 dispatchThreadId : SV_DispatchThreadID)
                 chosenGrid = grid;
                 chosenGridBSDF = bsdf;
                 chosenGridDistance = distance;
-                chosenGridMortonCode = gridMortonCode;
             }
-
-            // float gridWeight = bsdf * length(grid.intensity) / (grid.distance * grid.distance);
-            // weightSum += gridWeight;
-            // if (sampleNext1D(sg) < gridWeight / weightSum)
-            // {
-            //     chosenGrid = grid;
-            //     chosenGridPdf = gridPdf;
-            //     chosenGridWeight = gridWeight;
-            // }
         }
 
         float chosenGridWeight = length(chosenGridBSDF * chosenGrid.intensity) / (chosenGridDistance * chosenGridDistance);
@@ -169,17 +157,13 @@ void selectGridAndLight(uint3 dispatchThreadId : SV_DispatchThreadID)
             // ------------------------ BUG ------------------------ //
 
         // choose light
-        uint emissiveIdx;
+        uint emissiveIdx; // TODO: rename this to leadNodeIdx
         float idxPdf;
         sampleRangeUniformly(chosenGrid.range, sg, emissiveIdx, idxPdf);
+        uint emissiveTriangleIndex = gLeafNodes[emissiveIdx].triangleIdx;
         float emissivePdf = chosenGridPdf * idxPdf;
 
-        result = float4(emissiveIdx, emissivePdf, chosenGrid.rootNode, chosenGridMortonCode);
-        // result = float4(pos, 1);
-    }
-    else
-    {
-        result = float4(1, 0, 0, 1);
+        result = float4(emissiveTriangleIndex, emissivePdf, emissiveIdx, 1);
     }
 
     gLightIndex[launchIndex] = result;

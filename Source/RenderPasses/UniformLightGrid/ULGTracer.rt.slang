@@ -50,6 +50,10 @@ RWTexture2D<uint> gOutputTime;
 // Static configuration based on which buffers are bound.
 #define isValid(name) (is_valid_##name != 0)
 
+cbuffer PerFrameCB
+{
+    float AmplifyCofficient;
+}
 
 /** ********************* Ray index 0: Scatter ray ************************ */
 
@@ -184,6 +188,7 @@ void rayGen()
         // We're done accumulating over all samples.
         const float invSpp = 1.f / kSamplesPerPixel;
         outColor *= invSpp;
+        outColor *= AmplifyCofficient;
         outAlbedo = sd.diffuse + sd.specular;
         outAlpha = 1.f;
     }

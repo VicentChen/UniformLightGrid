@@ -3,7 +3,7 @@
 // TODO: Which ones need __exported
 import Scene.Scene;
 import Scene.ShadingData;
-import EmissiveULGSampler;
+__exported import EmissiveULGSampler;
 __exported import Utils.Helpers; // For computeRayOrigin()
 __exported import Utils.Math.MathHelpers;
 __exported import Experimental.Scene.Lights.EnvMapSampler;
@@ -15,12 +15,7 @@ __exported import RenderPasses.Shared.PathTracer.PathTracerParams;
 __exported import RenderPasses.Shared.PathTracer.PathTracerHelpers;
 __exported import Utils.Sampling.SampleGeneratorInterface;
 
-// TODO: add textures
 Texture2D<float4> gLightIndex;
-// TODO:
-//   In sampleULGSceneLights:
-//     1. replace `emissiveSampler` with `EmissiveULGSmapler`
-//     2. get triangleIndex from `gSelectedLights`
 
 /** Samples a light source in the scene.
     This function first stochastically selects a type of light source to sample,
@@ -35,7 +30,7 @@ Texture2D<float4> gLightIndex;
     \param[out] ls Generated light sample. Only valid if true is returned.
     \return True if a sample was generated, false otherwise.
 */
-bool sampleULGSceneLights<S : ISampleGenerator>(const PathTracerParams params, const EnvMapSampler envMapSampler, const EmissiveLightSampler emissiveSampler, const ShadingData sd, const float3 rayOrigin, const uint numSamples, inout S sg, out SceneLightSample ls)
+bool sampleULGSceneLights<S : ISampleGenerator>(const PathTracerParams params, const EnvMapSampler envMapSampler, const EmissiveLightSampler emissiveSampler, const EmissiveULGSampler emissiveULGSampler, const ShadingData sd, const float3 rayOrigin, const uint numSamples, inout S sg, out SceneLightSample ls)
 {
     // Set relative probabilities of the different sampling techniques.
     // TODO: These should use estimated irradiance from each light type. Using equal probabilities for now.
@@ -131,8 +126,13 @@ bool sampleULGSceneLights<S : ISampleGenerator>(const PathTracerParams params, c
             float selectionPdf = p[2];
 
             // Sample emissive lights.
+            uint2 launchIndex = DispatchRaysIndex().xy;
+            float4 lightIdx = gLightIndex[launchIndex];
+            uint triangleIdx = lightIdx.x;
+            float trianglePdf = lightIdx.y;
+
             TriangleLightSample lightSample;
-            bool valid = emissiveSampler.sampleLight(rayOrigin, sd.N, true, sg, lightSample);
+            bool valid = emissiveULGSampler.sampleLight(rayOrigin, sd.N, triangleIdx, trianglePdf, true, sg, lightSample);
 
             // Reject sample if lower hemisphere.
             if (!valid || dot(sd.N, lightSample.dir) < kMinCosTheta) return false;
@@ -173,6 +173,7 @@ bool sampleULGSceneLights<S : ISampleGenerator>(const PathTracerParams params, c
     \param[in] params Path tracer parameters.
     \param[in] envMapSampler Environment map sampler.
     \param[in] emissiveSampler Emissive light sampler.
+    \param[in] emissiveULGSampler Emissive triangle sampler.
     \param[in] sd Shading data.
     \param[in] i The sample index in the range [0, kLightSamplesPerVertex).
     \param[in,out] path Path data. The path flags will be updated to enable the i:th shadow ray if a sample was generated.
@@ -180,11 +181,11 @@ bool sampleULGSceneLights<S : ISampleGenerator>(const PathTracerParams params, c
     \param[in,out] shadowRay Shadow ray parameters and unoccluded contribution for the generated sample.
     \return True if a sample was generated, false otherwise.
 */
-bool generateULGShadowRay<S : ISampleGenerator>(const PathTracerParams params, const EnvMapSampler envMapSampler, const EmissiveLightSampler emissiveSampler, const ShadingData sd, const uint i, inout PathData path, inout S sg, inout ShadowRay shadowRay)
+bool generateULGShadowRay<S : ISampleGenerator>(const PathTracerParams params, const EnvMapSampler envMapSampler, const EmissiveLightSampler emissiveSampler, const EmissiveULGSampler emissiveULGSampler, const ShadingData sd, const uint i, inout PathData path, inout S sg, inout ShadowRay shadowRay)
 {
     // Sample the scene lights.
     SceneLightSample ls;
-    bool valid = sampleULGSceneLights(params, envMapSampler, emissiveSampler, sd, path.origin, kLightSamplesPerVertex, sg, ls);
+    bool valid = sampleULGSceneLights(params, envMapSampler, emissiveSampler, emissiveULGSampler, sd, path.origin, kLightSamplesPerVertex, sg, ls);
 
     if (valid && any(ls.Li > 0.f))
     {

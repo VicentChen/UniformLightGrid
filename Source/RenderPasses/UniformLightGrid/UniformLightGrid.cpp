@@ -110,6 +110,7 @@ UniformLightGrid::UniformLightGrid(const Dictionary& dict)
 
 AABB UniformLightGrid::sceneBoundHelper()
 {
+    // TODO: add way to get real scene bound
     const auto& sceneBound = mpScene->getSceneBounds();
     AABB hackedSceneBound = sceneBound;
     auto extent = hackedSceneBound.extent();
@@ -220,6 +221,7 @@ void UniformLightGrid::chooseGridsAndLights(RenderContext* pRenderContext, const
 
     // TODO: do we have better way to get scene bound?
     //const auto& sceneBound = mpScene->getSceneBounds();
+    // TODO: for grid selection, we need real scene bound and uniform scene bound here
     auto sceneBound = sceneBoundHelper();
 
     // Add missed channels here
@@ -330,6 +332,7 @@ void UniformLightGrid::execute(RenderContext* pRenderContext, const RenderData& 
 
     // ----- Uniform Light Grid Codes ----- //
     mULGTracer.pVars.getRootVar()["gLightIndex"] = renderData[kLightIndexInternal]->asTexture();
+    mULGTracer.pVars.getRootVar()["PerFrameCB"]["AmplifyCofficient"] = mAmplifyCofficient;
     // ----- Uniform Light Grid Codes ----- //
 
     // Get dimensions of ray dispatch.
@@ -352,8 +355,8 @@ void UniformLightGrid::execute(RenderContext* pRenderContext, const RenderData& 
 void UniformLightGrid::renderUI(Gui::Widgets& widget)
 {
     widget.text("");
+    widget.var("output color amplifer", mAmplifyCofficient, 1.0f, 100.0f, 1.0f);
     widget.var("min distance of grid selection", mMinDistanceOfGirdSelection, 0.01f, 1.0f, 0.01f);
-    widget.text("");
     widget.var("grid samples per direction", mSamplesPerDirection, 1u, 64u, 1u);
     widget.text("");
 

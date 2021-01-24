@@ -6,6 +6,7 @@ import Utils.Math.BitTricks;
 StructuredBuffer<LeafNode> gLeafNodes;
 StructuredBuffer<InternalNode> gInternalNodes;
 
+// TODO: better way to solve cbuffer name conflict
 cbuffer PerFrameBVHCB
 {
     uint gridMortonCodePrefixLength;
