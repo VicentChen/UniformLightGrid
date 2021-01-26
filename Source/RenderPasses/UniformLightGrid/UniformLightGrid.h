@@ -71,6 +71,15 @@ private:
     void prepareVars();
     void setTracerData(const RenderData& renderData);
 
+    void setULGTracerStaticParams(Program* pProgram) const;
+
+    struct
+    {
+        bool shadowRayAlwaysVisible = false;
+        bool useGroundTruthShadowRay = false;
+        bool useReflection = false;
+    } mULGTracerParams;
+
     // Ray tracing program.
     struct
     {
@@ -89,6 +98,7 @@ private:
     ComputePass::SharedPtr mpBVHConstructor;
 
     // grid and light selection data
+    uint mGridMortonCodePrefixLength = 27;
     float mMinDistanceOfGirdSelection = 0.1f;
     uint mSamplesPerDirection = 8;
     ComputePass::SharedPtr mpGridAndLightSelector;

@@ -3,6 +3,7 @@
 
 struct InternalNode
 {
+    // TODO: bottom level internal node as leaf node
     bool isLChildLeaf = false;
     bool isRChildLeaf = false;
     uint commonPrefixLength = 0;

@@ -22,6 +22,7 @@ cbuffer PerFrameCB
     // Duplicate in TraverseBVH.slang
     // uint quantLevels;
     // AABB sceneBound;
+    AABB realSceneBound;
 }
 
 // float4: triangleIndex, pdf, ??, ??
@@ -33,8 +34,8 @@ RWTexture2D<float4> gLightIndex;
 */
 float intersectWithSceneBound(const float3 rayOrigin, const float3 rayDir)
 {
-    float3 tMin = (sceneBound.minPoint - rayOrigin) / rayDir;
-    float3 tMax = (sceneBound.maxPoint - rayOrigin) / rayDir;
+    float3 tMin = (realSceneBound.minPoint - rayOrigin) / rayDir;
+    float3 tMax = (realSceneBound.maxPoint - rayOrigin) / rayDir;
     float3 t1 = min(tMin, tMax);
     float3 t2 = max(tMin, tMax);
     // float tNear = max(max(t1.x, t1.y), t1.z);
@@ -92,6 +93,156 @@ void sampleRangeUniformly<S : ISampleGenerator>(const uint2 range, inout S sg, o
     pdf = 1 / delta;
 }
 
+void selectGridByBRDF<S : ISampleGenerator>(const ShadingData sd, inout S sg, out UniformGrid chosenGrid, out float chosenGridPdf)
+{
+    float3 pos = sd.posW;
+
+    // compute direction by bsdf
+    // TODO: randomly choose direction
+    BSDFSample bsdfSample;
+    sampleBSDF(sd, sg, bsdfSample);
+    float3 dir = bsdfSample.wi;
+    float dirPdf = bsdfSample.pdf;
+    chosenGrid = {};
+    chosenGridPdf = 1.0f;
+
+    // multiple grid selection
+    // TODO: make as a struct?
+    float3 chosenGridBSDF = 0;
+    float chosenGridDistance = 0;
+    float weightSum = 0;
+    for (int dirSampleIdx = 0; dirSampleIdx < samplesPerDirection; dirSampleIdx++)
+    {
+        // random generate length
+        float dmin = minDistance;
+        float dmax = intersectWithSceneBound(pos, dir);
+        float distance, distancePdf;
+        sampleDistanceByDistSquare(dmin, dmax, sg, distance, distancePdf);
+        // sampleDistanceUniformly(dmin, dmax, sg, distance, distancePdf);
+
+        // choose grid
+        float3 gridPos = pos + dir * distance; //TODO: rename
+        uint gridMortonCode = computeMortonCodeByPos(gridPos);
+        float gridPdf = dirPdf * distancePdf;
+        // ----- random generate morton code ----- ///
+        // uint leafNodeCount = gScene.lightCollection.triangleCount;
+        // uint randomBegin = gLeafNodes[0].mortonCode;
+        // uint randomEnd   = gLeafNodes[leafNodeCount-1].mortonCode;
+        // gridMortonCode = uint(sampleNext1D(sg) * (randomEnd-randomBegin) + randomBegin);
+        // gridPdf = 1.0f / (randomEnd-randomBegin);
+        // ----- random generate morton code ----- ///
+
+        UniformGrid grid = traverseTreeForGird(gridMortonCode);
+
+        // recompute BSDF
+        float3 bsdf = evalBSDFCosine(sd, normalize(grid.pos - pos));
+
+        // ------------------------ BUG ------------------------ //
+        // random choose by weight
+        float gridWeight = length(bsdf * grid.intensity) / (distance * distance) / gridPdf;
+        weightSum += gridWeight;
+        if (sampleNext1D(sg) < gridWeight / weightSum)
+        {
+            chosenGrid = grid;
+            chosenGridBSDF = bsdf;
+            chosenGridDistance = distance;
+        }
+    }
+
+    float chosenGridWeight = length(chosenGridBSDF * chosenGrid.intensity) / max((chosenGridDistance * chosenGridDistance), 0.0001f);
+    chosenGridPdf = chosenGridWeight * samplesPerDirection / max(weightSum, 0.0001f);
+        // ------------------------ BUG ------------------------ //
+}
+
+void selectGridByTree<S : ISampleGenerator>(const ShadingData sd, inout S sg, out UniformGrid chosenGrid, out float chosenGridPdf)
+{
+    chosenGrid = {};
+    chosenGridPdf = 1.0f;
+
+    UniformGrid grid = {};
+    float r = sampleNext1D(sg);
+    float3 pos = sd.posW;
+
+    uint currNodeId = 0;
+    InternalNode currNode = gInternalNodes[currNodeId];
+    while (true)
+    {
+        // stop if current node size > grid size
+        // we have 32-bit integer and 30-bit morton code
+        if (currNode.commonPrefixLength > gridMortonCodePrefixLength + 2)
+        {
+            buildGridByInternalNode(currNodeId, grid);
+            break;
+        }
+
+        // prepare l child
+        uint lChild = currNode.lChildId;
+        bool isLChildLeaf = currNode.isLChildLeaf;
+        float3 lIntensity = 0.0f;
+        float3 lChildPos = 0;
+        if (isLChildLeaf)
+        {
+            lIntensity = gLeafNodes[lChild].intensity;
+            lChildPos = computePosByMortonCode(gLeafNodes[lChild].mortonCode);
+        }
+        else
+        {
+            lIntensity = gInternalNodes[lChild].intensity;
+            lChildPos = computePosByMortonCode(gInternalNodes[lChild].splitMortonCode, gInternalNodes[lChild].commonPrefixLength);
+        }
+        float lChildWeight = length(evalBSDFCosine(sd, normalize(lChildPos - pos)) * lIntensity / (distance(lChildPos, pos) * distance(lChildPos, pos)));
+
+        // prepare r child
+        uint rChild = currNode.rChildId;
+        bool isRChildLeaf = currNode.isRChildLeaf;
+        float3 rIntensity = 0;
+        float3 rChildPos = 0;
+        if (isRChildLeaf)
+        {
+            rIntensity = gLeafNodes[rChild].intensity;
+            rChildPos = computePosByMortonCode(gLeafNodes[rChild].mortonCode);
+        }
+        else
+        {
+            rIntensity = gInternalNodes[rChild].intensity;
+            rChildPos = computePosByMortonCode(gInternalNodes[rChild].splitMortonCode, gInternalNodes[rChild].commonPrefixLength);
+        }
+        float rChildWeight = length(evalBSDFCosine(sd, normalize(rChildPos - pos)) * rIntensity / (distance(rChildPos, pos) * distance(rChildPos, pos)));
+
+        // choose one child
+        bool isLeaf = false;
+
+        if (r * (lChildWeight + rChildWeight) < lChildWeight)
+        {
+            // Left child
+            currNodeId = lChild;
+            isLeaf = isLChildLeaf;
+            r = r / lChildWeight;
+            chosenGridPdf *= lChildWeight / (lChildWeight + rChildWeight);
+        }
+        else
+        {
+            // Right child
+            currNodeId = rChild;
+            isLeaf = isRChildLeaf;
+            r = (r - lChildWeight) / rChildWeight * (lChildWeight + rChildWeight);
+            chosenGridPdf *= rChildWeight / (lChildWeight + rChildWeight);
+        }
+
+        // stop if child is leaf
+        if (isLeaf)
+        {
+            buildGridByLeafNode(currNodeId, grid);
+            break;
+        }
+        else
+        {
+            currNode = gInternalNodes[currNodeId];
+        }
+    }
+    chosenGrid = grid;
+}
+
 [numthreads(CHUNK_SIZE, CHUNK_SIZE, 1)]
 void selectGridAndLight(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -108,53 +259,10 @@ void selectGridAndLight(uint3 dispatchThreadId : SV_DispatchThreadID)
     ShadingData sd;
     if (loadShadingData(launchIndex, launchDim, gScene.camera, sd))
     {
-        float3 pos = sd.posW;
-
-        // compute direction by bsdf
-        // TODO: randomly choose direction
-        BSDFSample bsdfSample;
-        sampleBSDF(sd, sg, bsdfSample);
-        float3 dir = bsdfSample.wi;
-        float dirPdf = bsdfSample.pdf;
-
-        // multiple grid selection
-        // TODO: make as a struct?
         UniformGrid chosenGrid = {};
-        float3 chosenGridBSDF = 0;
-        float chosenGridDistance = 0;
-        float weightSum = 0;
-        for (int dirSampleIdx = 0; dirSampleIdx < samplesPerDirection; dirSampleIdx++)
-        {
-            // random generate length
-            float dmin = minDistance;
-            float dmax = intersectWithSceneBound(pos, dir);
-            float distance, distancePdf;
-            sampleDistanceByDistSquare(dmin, dmax, sg, distance, distancePdf);
-
-            // choose grid
-            float3 gridPos = pos + dir * distance; //TODO: rename
-            uint gridMortonCode = computeMortonCodeByPos(gridPos);
-            float gridPdf = dirPdf * distancePdf;
-            UniformGrid grid = traverseTreeForGird(gridMortonCode);
-
-            // recompute BSDF
-            float3 bsdf = evalBSDFCosine(sd, normalize(grid.pos - pos));
-
-            // ------------------------ BUG ------------------------ //
-            // random choose by weight
-            float gridWeight = length(bsdf * grid.intensity) / (distance * distance) / gridPdf;
-            weightSum += gridWeight;
-            if (sampleNext1D(sg) < gridWeight / weightSum)
-            {
-                chosenGrid = grid;
-                chosenGridBSDF = bsdf;
-                chosenGridDistance = distance;
-            }
-        }
-
-        float chosenGridWeight = length(chosenGridBSDF * chosenGrid.intensity) / (chosenGridDistance * chosenGridDistance);
-        float chosenGridPdf = chosenGridWeight * samplesPerDirection / weightSum;
-            // ------------------------ BUG ------------------------ //
+        float chosenGridPdf = 0.0f;
+        selectGridByBRDF(sd, sg, chosenGrid, chosenGridPdf);
+        // selectGridByTree(sd, sg, chosenGrid, chosenGridPdf);
 
         // choose light
         uint emissiveIdx; // TODO: rename this to leadNodeIdx
@@ -163,7 +271,7 @@ void selectGridAndLight(uint3 dispatchThreadId : SV_DispatchThreadID)
         uint emissiveTriangleIndex = gLeafNodes[emissiveIdx].triangleIdx;
         float emissivePdf = chosenGridPdf * idxPdf;
 
-        result = float4(emissiveTriangleIndex, emissivePdf, emissiveIdx, 1);
+        result = float4(emissiveTriangleIndex, emissivePdf, idxPdf, 1);
     }
 
     gLightIndex[launchIndex] = result;

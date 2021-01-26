@@ -42,7 +42,6 @@ namespace
 
     // compute shader settings
     const uint32_t kQuantLevels = 1024; // TODO: make as variable
-    const uint32_t kGridMortonCodePrefixLength = 27; // TODO: make as variable
     const uint32_t kGroupSize = 512;
     const uint32_t kChunkSize = 16;
 
@@ -221,12 +220,12 @@ void UniformLightGrid::chooseGridsAndLights(RenderContext* pRenderContext, const
 
     // TODO: do we have better way to get scene bound?
     //const auto& sceneBound = mpScene->getSceneBounds();
-    // TODO: for grid selection, we need real scene bound and uniform scene bound here
+    // for grid selection, we need real scene bound and uniform scene bound here
     auto sceneBound = sceneBoundHelper();
+    auto realSceneBound = mpScene->getSceneBounds();
 
     // Add missed channels here
-    // TODO: replace string literal to constant variables
-        // Bind I/O buffers. These needs to be done per-frame as the buffers may change anytime.
+    // Bind I/O buffers. These needs to be done per-frame as the buffers may change anytime.
     auto bind = [&](const ChannelDesc& desc)
     {
         if (!desc.texname.empty())
@@ -236,9 +235,6 @@ void UniformLightGrid::chooseGridsAndLights(RenderContext* pRenderContext, const
         }
     };
     for (auto channel : mInputChannels) bind(channel);
-    //mpGridAndLightSelector.getRootVar()["gWorldView"] = renderData["viewW"]->asTexture();
-    //mpGridAndLightSelector.getRootVar()["gWorldShadingTangent"] = renderData["tangentW"]->asTexture();
-    //mpGridAndLightSelector.getRootVar()["gVBuffer"] = renderData["vbuffer"]->asTexture();
 
     mpGridAndLightSelector.getRootVar()["gLightIndex"] = pLightIndexTexture;
     mpGridAndLightSelector.getRootVar()["gScene"] = mpScene->getParameterBlock();
@@ -250,7 +246,10 @@ void UniformLightGrid::chooseGridsAndLights(RenderContext* pRenderContext, const
     var["frameCount"] = mSharedParams.frameCount;
     var["minDistance"] = mMinDistanceOfGirdSelection;
     var["samplesPerDirection"] = mSamplesPerDirection;
-    mpGridAndLightSelector.getRootVar()["PerFrameBVHCB"]["gridMortonCodePrefixLength"] = kGridMortonCodePrefixLength;
+    // TODO: function to bind AABB
+    var["realSceneBound"]["minPoint"] = realSceneBound.minPoint;
+    var["realSceneBound"]["maxPoint"] = realSceneBound.maxPoint;
+    mpGridAndLightSelector.getRootVar()["PerFrameBVHCB"]["gridMortonCodePrefixLength"] = mGridMortonCodePrefixLength;
     mpGridAndLightSelector.getRootVar()["PerFrameBVHCB"]["quantLevels"] = kQuantLevels;
     mpGridAndLightSelector.getRootVar()["PerFrameBVHCB"]["sceneBound"]["minPoint"] = sceneBound.minPoint;
     mpGridAndLightSelector.getRootVar()["PerFrameBVHCB"]["sceneBound"]["maxPoint"] = sceneBound.maxPoint;
@@ -297,6 +296,7 @@ void UniformLightGrid::execute(RenderContext* pRenderContext, const RenderData& 
     // Set compile-time constants.
     RtProgram::SharedPtr pProgram = mULGTracer.pProgram;
     setStaticParams(pProgram.get());
+    setULGTracerStaticParams(pProgram.get());
 
     // For optional I/O resources, set 'is_valid_<name>' defines to inform the program of which ones it can access.
     // TODO: This should be moved to a more general mechanism using Slang.
@@ -354,10 +354,16 @@ void UniformLightGrid::execute(RenderContext* pRenderContext, const RenderData& 
 
 void UniformLightGrid::renderUI(Gui::Widgets& widget)
 {
+    // TODO: render mTracerParams
     widget.text("");
+    widget.var("grid morton code prefix length", mGridMortonCodePrefixLength, 3u, 27u, 3u);
     widget.var("output color amplifer", mAmplifyCofficient, 1.0f, 100.0f, 1.0f);
-    widget.var("min distance of grid selection", mMinDistanceOfGirdSelection, 0.01f, 1.0f, 0.01f);
+    widget.var("min distance of grid selection", mMinDistanceOfGirdSelection, 0.1f, 100.0f, 0.1f);
     widget.var("grid samples per direction", mSamplesPerDirection, 1u, 64u, 1u);
+    widget.text("ULG Tracer Params");
+    widget.checkbox("shadow ray always visible?", mULGTracerParams.shadowRayAlwaysVisible);
+    widget.checkbox("use ground truth shadow ray?", mULGTracerParams.useGroundTruthShadowRay);
+    widget.checkbox("use reflection?", mULGTracerParams.useReflection);
     widget.text("");
 
     PathTracer::renderUI(widget);
@@ -410,4 +416,12 @@ void UniformLightGrid::setTracerData(const RenderData& renderData)
         bool success = mpEmissiveSampler->setShaderData(pBlock["emissiveSampler"]);
         if (!success) throw std::exception("Failed to bind emissive light sampler");
     }
+}
+
+void UniformLightGrid::setULGTracerStaticParams(Program* pProgram) const
+{
+    pProgram->addDefine("ULG_TRACER_PARAM", "1");
+    pProgram->addDefine("SHADOW_RAY_ALWAYS_VISIBLE", mULGTracerParams.shadowRayAlwaysVisible ? "1" : "0");
+    pProgram->addDefine("USE_GROUND_TRUTH_SHADOW_RAY", mULGTracerParams.useGroundTruthShadowRay ? "1" : "0");
+    pProgram->addDefine("USE_REFLECTION", mULGTracerParams.useReflection ? "1" : "0");
 }

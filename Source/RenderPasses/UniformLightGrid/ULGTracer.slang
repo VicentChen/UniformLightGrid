@@ -45,6 +45,7 @@ __exported import RenderPasses.Shared.PathTracer.InteriorListHelpers;
 __exported import RenderPasses.Shared.PathTracer.RayFootprint;
 __exported import Utils.Debug.PixelDebug;
 import ULGTracerHelpers;
+import ULGStaticParams;
 
 static const bool kForceOpaque = !kUseAlphaTest;
 
@@ -297,9 +298,13 @@ void evalDirect(const PathTracerData pt, ShadingData sd, inout PathData path)
     {
         ShadowRay shadowRay = {};
         // TODO: add switch for different shadow ray generators
-        bool valid = generateULGShadowRay(pt.params, pt.envMapSampler, pt.emissiveSampler, pt.emissiveULGSampler, sd, i, path, path.sg, shadowRay);
-        // bool valid = generateShadowRay(pt.params, pt.envMapSampler, pt.emissiveSampler, sd, i, path, path.sg, shadowRay);
+        bool valid = false;
+        if (kUseGroundTruthShadowRay)
+            valid = generateShadowRay(pt.params, pt.envMapSampler, pt.emissiveSampler, sd, i, path, path.sg, shadowRay);
+        else
+            valid = generateULGShadowRay(pt.params, pt.envMapSampler, pt.emissiveSampler, pt.emissiveULGSampler, sd, i, path, path.sg, shadowRay);
         bool visible = traceShadowRay(path.origin, shadowRay.rayParams.xyz, shadowRay.rayParams.w, valid);
+        if (kShadowRayAlwaysVisible) visible = true;
         path.L += visible ? shadowRay.Lr : float3(0.f);
     }
 }
@@ -333,6 +338,9 @@ void tracePath(const PathTracerData pt, ShadingData sd, inout PathData path)
             evalDirect(pt, sd, path);
         }
 
+        // stop reflection
+        if (!kUseReflection) continue;
+
         // Russian roulette to stochastically terminate the path.
         // We use a fixed absorption probability for now.
         // TODO: Better strategy, e.g., 1-P(absorption) = hemispherical reflectance of BRDF.
@@ -343,46 +351,46 @@ void tracePath(const PathTracerData pt, ShadingData sd, inout PathData path)
             path.thp /= (1.f - pt.params.probabilityAbsorption);
         }
 
-        // // Save incoming ray direction for ray footprint.
-        // const float3 rayDirIn = path.dir;
+        // Save incoming ray direction for ray footprint.
+        const float3 rayDirIn = path.dir;
 
-        // // Generate next path segment.
-        // if (!generateScatterRay(pt.params, sd, path, path.sg)) return;
+        // Generate next path segment.
+        if (!generateScatterRay(pt.params, sd, path, path.sg)) return;
 
-        // // Scatter the ray footprint out of the surface. Primary bounce is handled at footprint creation time.
-        // if (depth > 0)
-        // {
-        //     path.rayFootprint.bounceOnSurface(v, triangleVertices, path.hit, sd, v.normalW, rayDirIn, path.dir, path.isSpecular(), path.isTransmission());
-        // }
+        // Scatter the ray footprint out of the surface. Primary bounce is handled at footprint creation time.
+        if (depth > 0)
+        {
+            path.rayFootprint.bounceOnSurface(v, triangleVertices, path.hit, sd, v.normalW, rayDirIn, path.dir, path.isSpecular(), path.isTransmission());
+        }
 
-        // // Update ray origin on transmissive events.
-        // if (path.isTransmission()) path.origin = path.transmissionOrigin;
+        // Update ray origin on transmissive events.
+        if (path.isTransmission()) path.origin = path.transmissionOrigin;
 
-        // // Check if this is the last path vertex.
-        // const bool isLastVertex = path.length == kMaxBounces || path.nonSpecularBounces > kMaxNonSpecularBounces;
+        // Check if this is the last path vertex.
+        const bool isLastVertex = path.length == kMaxBounces || path.nonSpecularBounces > kMaxNonSpecularBounces;
 
-        // // Terminate if this is the last path vertex and light sampling already completely sampled incident radiance.
-        // if (isLastVertex && (kUseNEE && !kUseMIS && path.isLightSamplable())) return;
+        // Terminate if this is the last path vertex and light sampling already completely sampled incident radiance.
+        if (isLastVertex && (kUseNEE && !kUseMIS && path.isLightSamplable())) return;
 
-        // // Terminate caustics paths.
-        // if (kDisableCaustics && path.isSpecular() && path.nonSpecularBounces > 0) return;
+        // Terminate caustics paths.
+        if (kDisableCaustics && path.isSpecular() && path.nonSpecularBounces > 0) return;
 
-        // // Trace scatter ray.
-        // // The path will either be directly terminated or a hit/miss is reported.
-        // if (!traceScatterRay(path.origin, path.dir, path.interiorList, path.hit)) return;
+        // Trace scatter ray.
+        // The path will either be directly terminated or a hit/miss is reported.
+        if (!traceScatterRay(path.origin, path.dir, path.interiorList, path.hit)) return;
 
-        // // Handle scatter ray hit/miss.
-        // if (path.hit.instanceID != HitInfo::kInvalidIndex)
-        // {
-        //     handleHit(pt, sd, path);
-        // }
-        // else
-        // {
-        //     handleMiss(pt, path);
-        //     break;
-        // }
+        // Handle scatter ray hit/miss.
+        if (path.hit.instanceID != HitInfo::kInvalidIndex)
+        {
+            handleHit(pt, sd, path);
+        }
+        else
+        {
+            handleMiss(pt, path);
+            break;
+        }
 
-        // // Terminate after handling the last path vertex.
-        // if (isLastVertex) return;
+        // Terminate after handling the last path vertex.
+        if (isLastVertex) return;
     }
 }
