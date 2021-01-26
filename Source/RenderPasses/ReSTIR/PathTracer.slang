@@ -39,13 +39,13 @@
 __exported import Scene.Scene;
 __exported import Scene.Raytracing;
 __exported import Scene.HitInfo;
-__exported import RenderPasses.Shared.PathTracer.PixelStats;
+
 __exported import RenderPasses.Shared.PathTracer.PathTracerHelpers;
 __exported import RenderPasses.Shared.PathTracer.InteriorListHelpers;
 __exported import RenderPasses.Shared.PathTracer.RayFootprint;
 __exported import Utils.Debug.PixelDebug;
 
-static const bool kForceOpaque = !kUseAlphaTest;
+
 
 /** Shared path tracer data.
     The ray tracing program instantiates this and passes it to all functions.
@@ -57,13 +57,6 @@ struct PathTracerData
     EmissiveLightSampler    emissiveSampler;    ///< Emissive light sampler.
 };
 
-/** Payload for shadow ray.
-*/
-struct ShadowRayData
-{
-    bool visible;
-};
-
 /** Payload for scatter ray.
 */
 struct ScatterRayData
@@ -71,36 +64,7 @@ struct ScatterRayData
     PackedHitInfo packedHitInfo;        ///< Packed HitInfo data, or kInvalidIndex in the first component if ray missed.
 };
 
-/** Traces a shadow ray towards a light source.
-    \param[in] origin Ray origin for the shadow ray.
-    \param[in] dir Direction from ray origin towards the light source (normalized).
-    \param[in] distance Distance to the light source.
-    \param[in] valid True if ray should be traced, false for dummy rays.
-    \return True if light is visible, false otherwise.
-*/
-bool traceShadowRay(float3 origin, float3 dir, float distance, bool valid = true)
-{
-    // Setup ray descriptor.
-    RayDesc ray;
-    ray.Origin = origin;
-    ray.Direction = dir;
-    ray.TMin = 0.f;
-    ray.TMax = valid ? distance : 0.f; // Set tmax = 0.0 for dummy rays.
 
-    ShadowRayData rayData = { false }; // Set to true by miss shader if ray is not terminated before
-    uint rayFlags = RAY_FLAG_SKIP_CLOSEST_HIT_SHADER | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH;
-    if (kForceOpaque) rayFlags |= RAY_FLAG_FORCE_OPAQUE;
-    TraceRay(gRtScene, rayFlags, 0xff /* instanceInclusionMask */, kRayTypeShadow /* hitIdx */, hitProgramCount, kRayTypeShadow /* missIdx */, ray, rayData);
-
-    // We let TraceRay() execute even when !valid in order to run the miss shader.
-    // This is faster on current drivers thanks to reduced divergence.
-    if (!valid) return false;
-
-    // Note we're not counting stats for dummy rays. TODO: Make a separate bin in the logger.
-    logTraceRay(PixelStatsRayType::Shadow);
-
-    return rayData.visible;
-}
 
 /** Traces a scatter ray.
     \param[in] origin Ray origin for the shadow ray.
@@ -327,32 +291,45 @@ void evalReSTIRDirect(const PathTracerData pt, ShadingData sd, inout PathData pa
                 PrevIndex.y = ((1.f - ScreenSpace.y) / 2.f) * (float)LaunchDim.y;	
             }
             if(PrevIndex.x >= 0 && PrevIndex.x < 1920 && PrevIndex.y >= 0 && PrevIndex.y < 1080)
-            {					
-                float4 Res2Combine[8];
+            {
+                ReservoirInfo Res2Combine[8];
+                
                 float3 PixelPos[8];
                 float2 uArray[8];
                 float  pdfArray[8];
-                Res2Combine[0] = CurrRes;
-                uArray[0] = uFinalCurr[uint3(LaunchIndex, i)].xy;
-                pdfArray[0] = uFinalCurr[uint3(LaunchIndex, i)].z;
-                //PixelPos[0] = WorldPos.xyz;
-                Res2Combine[1] = ReservoirPrev[uint3(PrevIndex, i)];
-                uArray[1] = uFinalPrev[uint3(PrevIndex, i)].xy;
-                pdfArray[1] = uFinalPrev[uint3(LaunchIndex, i)].z;
-                //PixelPos[1] = PrevPos[PrevIndex].xyz;
+                Res2Combine[0].Res = CurrRes;
+                Res2Combine[0].u = uFinalCurr[uint3(LaunchIndex, i)].xy;
+                Res2Combine[0].pdf = uFinalCurr[uint3(LaunchIndex, i)].z;
+                Res2Combine[0].Pos = gWorldPosition[LaunchIndex].xyz;
+                Res2Combine[1].Res = ReservoirPrev[uint3(PrevIndex, i)];
+                Res2Combine[1].u = uFinalPrev[uint3(PrevIndex, i)].xy;
+                Res2Combine[1].pdf = uFinalPrev[uint3(PrevIndex, i)].z;
+                Res2Combine[1].Pos = PrevPos[PrevIndex].xyz;
 
                 float4 Res = float4(0.0f);
 
-                Res = CombineReservoirs(sd, path.sg, Res2Combine, uArray, pdfArray, 2, u, pdf);
+                if (Unbiased)
+                {
+                    //Res = CombineResservoirsUnbiased(sd, path.sg, Res2Combine, 2, u, pdf);
+                    Res = CombineReservoirs(sd, path.sg, Res2Combine, 2, u, pdf);
+                    ReservoirPrev[uint3(LaunchIndex, i)] = CurrRes;
+                }
+                else
+                    Res = CombineReservoirs(sd, path.sg, Res2Combine, 2, u, pdf);
 
                 ReservoirTemporal[uint3(LaunchIndex, i)] = Res;
                 uFinalTemporal[uint3(LaunchIndex, i)] = float4(u, pdf, 1.0f);
             }
+            else
+            {
+                ReservoirTemporal[uint3(LaunchIndex, i)] = CurrRes;
+                uFinalTemporal[uint3(LaunchIndex, i)] = uFinalCurr[uint3(LaunchIndex, i)];
+            }
         }
         else
         {
-            ReservoirPrev[uint3(LaunchIndex, i)] = float4(0.0f);
-            uFinalPrev[uint3(LaunchIndex, i)] = float4(0.5f, 0.5f, 0.0, 0.0);
+            //ReservoirPrev[uint3(LaunchIndex, i)] = float4(0.0f);
+            //uFinalPrev[uint3(LaunchIndex, i)] = float4(0.5f, 0.5f, 0.0, 0.0);
 			ReservoirTemporal[uint3(LaunchIndex, i)] = CurrRes;
             uFinalTemporal[uint3(LaunchIndex, i)] = uFinalCurr[uint3(LaunchIndex, i)];
         }

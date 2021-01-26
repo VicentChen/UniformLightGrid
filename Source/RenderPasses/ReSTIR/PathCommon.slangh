@@ -13,6 +13,8 @@ __exported import RenderPasses.Shared.PathTracer.PathTracerParams;
 __exported import Utils.Sampling.SampleGeneratorInterface;
 __exported import RenderPasses.Shared.PathTracer.PathTracerHelpers;
 import Experimental.Scene.Lights.EmissivePowerSampler;
+import RenderPasses.Shared.PathTracer.LoadShadingData;
+__exported import RenderPasses.Shared.PathTracer.PixelStats;
 
 cbuffer PerFrameCB
 {		
@@ -21,12 +23,12 @@ cbuffer PerFrameCB
 	uint CandidateCount;
 	uint ReservoirPerPixel;
 	bool Unbiased;
-    float4x4 LastCameraMatrix;
-    bool IsUseMotionVector;
-    bool IsSpatialReuse;
-    uint NeighborCount;
-    float NeighborsRange;
-    uint FrameCount;
+	float4x4 LastCameraMatrix;
+	bool IsUseMotionVector;
+	bool IsSpatialReuse;
+	uint NeighborCount;
+	float NeighborsRange;
+	uint FrameCount;
 }
 
 RWTexture2DArray<float4> ReservoirTemporal;
@@ -38,190 +40,240 @@ RWTexture2DArray<float4> uFinalPrev;
 RWTexture2DArray<float4> uFinalTemporal;
 RWTexture2DArray<float4> uFinalSpatial;
 Texture2D<float4> MotionVector;
+RWTexture2D<float4> PrevPos;
+
+static const bool kForceOpaque = !kUseAlphaTest;
+
+/** Payload for shadow ray.
+*/
+struct ShadowRayData
+{
+    bool visible;
+};
+
+
+struct ReservoirInfo
+{
+	float4 Res = float4(0.0);
+	float2 u = float2(0.0);
+	float pdf = 0;
+	float3 Pos = float3(0.0);
+}
 
 float evalReSTIRMIS(float n0, float p0, float n1, float p1)
 {
-    switch (kMISHeuristic)
-    {
-    case MISHeuristic::BalanceHeuristic:
-    {
-        float q0 = n0 * p0;
-        float q1 = n1 * p1;
-        return q0 / (q0 + q1);
-    }
-    case MISHeuristic::PowerTwoHeuristic:
-    {
-        float q0 = (n0 * p0) * (n0 * p0);
-        float q1 = (n1 * p1) * (n1 * p1);
-        return q0 / (q0 + q1);
-    }
-    default:
-        return 0.f;
-    }
+	switch (kMISHeuristic)
+	{
+	case MISHeuristic::BalanceHeuristic:
+	{
+		float q0 = n0 * p0;
+		float q1 = n1 * p1;
+		return q0 / (q0 + q1);
+	}
+	case MISHeuristic::PowerTwoHeuristic:
+	{
+		float q0 = (n0 * p0) * (n0 * p0);
+		float q1 = (n1 * p1) * (n1 * p1);
+		return q0 / (q0 + q1);
+	}
+	default:
+		return 0.f;
+	}
 }
 
 bool importanceSampleEmissive<S : ISampleGenerator>(EmissivePowerSampler emissiveSampler, out uint xi, out float2 u, out float pdf, const float3 posW, inout S sg)
 {
-    TriangleLightSample ls;
-    EmissivePower _emissivePower = emissiveSampler._emissivePower;
+	TriangleLightSample ls;
+	EmissivePower _emissivePower = emissiveSampler._emissivePower;
 
-    if (gScene.lightCollection.isEmpty()) return false;
+	if (gScene.lightCollection.isEmpty()) return false;
 
-    // Randomly pick a triangle out of the global list with uniform probability.
-    float uLight = sampleNext1D(sg);
-    uint triangleCount = gScene.lightCollection.triangleCount;
-    // Safety precaution as the result of the multiplication may be rounded to triangleCount even if uLight < 1.0 when triangleCount is large.
-    uint triangleIndex = min((uint)(uLight * triangleCount), triangleCount - 1);
+	// Randomly pick a triangle out of the global list with uniform probability.
+	float uLight = sampleNext1D(sg);
+	uint triangleCount = gScene.lightCollection.triangleCount;
+	// Safety precaution as the result of the multiplication may be rounded to triangleCount even if uLight < 1.0 when triangleCount is large.
+	uint triangleIndex = min((uint)(uLight * triangleCount), triangleCount - 1);
 
-    uint2 packed = _emissivePower.triangleAliasTable[triangleIndex];
-    float threshold = f16tof32(packed.x >> 16u);
-    uint  selectAbove = ((packed.x & 0xFFFFu) << 8u) | ((packed.y >> 24u) & 0xFFu);
-    uint  selectBelow = packed.y & 0xFFFFFFu;
+	uint2 packed = _emissivePower.triangleAliasTable[triangleIndex];
+	float threshold = f16tof32(packed.x >> 16u);
+	uint  selectAbove = ((packed.x & 0xFFFFu) << 8u) | ((packed.y >> 24u) & 0xFFu);
+	uint  selectBelow = packed.y & 0xFFFFFFu;
 
-    // Test the threshold in the current table entry; pick one of the two options
-    triangleIndex = (sampleNext1D(sg) >= threshold) ? selectAbove : selectBelow;
+	// Test the threshold in the current table entry; pick one of the two options
+	triangleIndex = (sampleNext1D(sg) >= threshold) ? selectAbove : selectBelow;
 
-    float triangleSelectionPdf = gScene.lightCollection.fluxData[triangleIndex].flux * _emissivePower.invWeightsSum;
+	float triangleSelectionPdf = gScene.lightCollection.fluxData[triangleIndex].flux * _emissivePower.invWeightsSum;
 
-    // Sample the triangle uniformly.
-    u = sampleNext2D(sg);
-    xi = triangleIndex;
-    pdf = triangleSelectionPdf;
+	// Sample the triangle uniformly.
+	u = sampleNext2D(sg);
+	xi = triangleIndex;
+	pdf = triangleSelectionPdf;
 
-    if (!sampleTriangle(posW, triangleIndex, u, ls)) return false;
+	if (!sampleTriangle(posW, triangleIndex, u, ls)) return false;
 
-    // The final probability density is the product of the sampling probabilities.
-    ls.pdf *= triangleSelectionPdf;
-    return true;
+	// The final probability density is the product of the sampling probabilities.
+	ls.pdf *= triangleSelectionPdf;
+	return true;
 }
 
 bool getLightSample<S : ISampleGenerator>(in uint xi, in float2 u, in float triangleSelectionPdf, const ShadingData sd, const float3 rayOrigin, inout S sg, out SceneLightSample ls)
 {
-    float p[3];
-    p[0] = 1.f;
-    p[1] = 1.f;
-    p[2] = 1.f;
+	float p[3];
+	p[0] = 1.f;
+	p[1] = 1.f;
+	p[2] = 1.f;
 
-    // Normalize probabilities. Early out if zero.
-    float sum = p[0] + p[1] + p[2];
-    if (sum == 0.f) return false;
+	// Normalize probabilities. Early out if zero.
+	float sum = p[0] + p[1] + p[2];
+	if (sum == 0.f) return false;
 
-    float invSum = 1.f / sum;
-    p[0] *= invSum;
-    p[1] *= invSum;
-    p[2] *= invSum;
+	float invSum = 1.f / sum;
+	p[0] *= invSum;
+	p[1] *= invSum;
+	p[2] *= invSum;
 
-    uint LightCount = gScene.getLightCount();
-    uint EmissiveCount = gScene.lightCollection.triangleCount;
-    float numSamples = 1.f;
-    if (xi < LightCount)
-    {
-        float selectionPdf = p[1] / LightCount; // TODO: Precompute 1.f/lightCount in cbuffer
-        // Sample local light source.
-        AnalyticLightSample lightSample;
-        // Only support point and direction light
-        bool valid = sampleLight(rayOrigin, gScene.getLight(xi), sg, lightSample);
-        // Reject sample if lower hemisphere.
-        if (!valid || dot(sd.N, lightSample.dir) < kMinCosTheta) return false;
-        // Setup returned sample.
-        // Analytic lights do not currently have a geometric representation in the scene.
-        // Do not worry about adjusting the ray to avoid self-intersections at the light.
-        ls.rayDir = ls.dir = lightSample.dir;
-        ls.rayDistance = ls.distance = lightSample.distance;
-        ls.pdf = selectionPdf * lightSample.pdf;
-        ls.Li = lightSample.Li / (selectionPdf * numSamples);
+	uint LightCount = gScene.getLightCount();
+	uint EmissiveCount = gScene.lightCollection.triangleCount;
+	float numSamples = 1.f;
+	if (xi < LightCount)
+	{
+		float selectionPdf = p[1] / LightCount; // TODO: Precompute 1.f/lightCount in cbuffer
+		// Sample local light source.
+		AnalyticLightSample lightSample;
+		// Only support point and direction light
+		bool valid = sampleLight(rayOrigin, gScene.getLight(xi), sg, lightSample);
+		// Reject sample if lower hemisphere.
+		if (!valid || dot(sd.N, lightSample.dir) < kMinCosTheta) return false;
+		// Setup returned sample.
+		// Analytic lights do not currently have a geometric representation in the scene.
+		// Do not worry about adjusting the ray to avoid self-intersections at the light.
+		ls.rayDir = ls.dir = lightSample.dir;
+		ls.rayDistance = ls.distance = lightSample.distance;
+		ls.pdf = selectionPdf * lightSample.pdf;
+		ls.Li = lightSample.Li / (selectionPdf * numSamples);
 
-        return true;
-    }
-    else if (xi < LightCount + EmissiveCount)
-    {
-        float selectionPdf = p[2];
+		return true;
+	}
+	else if (xi < LightCount + EmissiveCount)
+	{
+		float selectionPdf = p[2];
 
-        // Sample emissive lights.
-        TriangleLightSample lightSample;
-        uint triangleIndex = xi - LightCount;
-        bool valid = sampleTriangle(sd.posW, triangleIndex, u, lightSample);
-        lightSample.pdf *= triangleSelectionPdf;
+		// Sample emissive lights.
+		TriangleLightSample lightSample;
+		uint triangleIndex = xi - LightCount;
+		bool valid = sampleTriangle(sd.posW, triangleIndex, u, lightSample);
+		lightSample.pdf *= triangleSelectionPdf;
 
-        // Reject sample if lower hemisphere.
-        if (!valid || dot(sd.N, lightSample.dir) < kMinCosTheta) return false;
+		// Reject sample if lower hemisphere.
+		if (!valid || dot(sd.N, lightSample.dir) < kMinCosTheta) return false;
 
-        // Evaluate MIS with BRDF sampling as the other sampling strategy.
-        float pdf = selectionPdf * lightSample.pdf;
-        float misWeight = 1.f;
-        if (kUseMIS && pdf > 0.f)
-        {
-            float brdfPdf = evalPdfScatter(sd, lightSample.dir);
-            misWeight = evalReSTIRMIS(numSamples, pdf, 1, brdfPdf);
-        }
+		// Evaluate MIS with BRDF sampling as the other sampling strategy.
+		float pdf = selectionPdf * lightSample.pdf;
+		float misWeight = 1.f;
+		if (kUseMIS && pdf > 0.f)
+		{
+			float brdfPdf = evalPdfScatter(sd, lightSample.dir);
+			misWeight = evalReSTIRMIS(numSamples, pdf, 1, brdfPdf);
+		}
 
-        // Compute offset light sample position to reduce self-intersections at the light.
-        // We compute the shadow ray parameters based on the offset position.
-        float3 offsetPos = computeRayOrigin(lightSample.posW, lightSample.normalW);
-        float3 toLight = offsetPos - rayOrigin;
-        ls.rayDistance = length(toLight);
-        ls.rayDir = normalize(toLight);
+		// Compute offset light sample position to reduce self-intersections at the light.
+		// We compute the shadow ray parameters based on the offset position.
+		float3 offsetPos = computeRayOrigin(lightSample.posW, lightSample.normalW);
+		float3 toLight = offsetPos - rayOrigin;
+		ls.rayDistance = length(toLight);
+		ls.rayDir = normalize(toLight);
 
-        // Setup returned sample.
-        ls.dir = lightSample.dir;
-        ls.distance = lightSample.distance;
-        ls.pdf = pdf;
-        ls.Li = pdf > 0.f ? lightSample.Le * misWeight / (pdf * numSamples) : float3(0);
+		// Setup returned sample.
+		ls.dir = lightSample.dir;
+		ls.distance = lightSample.distance;
+		ls.pdf = pdf;
+		ls.Li = pdf > 0.f ? lightSample.Le * misWeight / (pdf * numSamples) : float3(0);
 
-        return true;
-    }
-    return false;
+		return true;
+	}
+	return false;
 }
 
 
 bool generateReSTIRShadowRay<S : ISampleGenerator>(const ShadingData sd, inout PathData path, inout S sg, inout ShadowRay shadowRay, in uint xi, in float2 u, in float pdf)
 {
-    // Sample the scene lights.
-    SceneLightSample ls;
-    bool valid = getLightSample(xi, u, pdf, sd, path.origin, sg, ls);
+	// Sample the scene lights.
+	SceneLightSample ls;
+	bool valid = getLightSample(xi, u, pdf, sd, path.origin, sg, ls);
 
-    if (valid && any(ls.Li > 0.f))
-    {
-        float3 Lr = evalBSDFCosine(sd, ls.dir) * ls.Li * path.thp;
-        if (any(Lr > 0.f))
-        {
-            // The sample is valid and has a non-zero contribution.
-            // Store ray parameters and unoccluded radiance, weighted by path throughput.
-            path.flags |= (uint(PathFlags::shadowRay) << 0);
-            shadowRay.rayParams = float4(ls.rayDir, ls.rayDistance);
-            shadowRay.Lr = Lr;
-            return true;
-        }
-    }
-    return false;
+	if (valid && any(ls.Li > 0.f))
+	{
+		float3 Lr = evalBSDFCosine(sd, ls.dir) * ls.Li * path.thp;
+		if (any(Lr > 0.f))
+		{
+			// The sample is valid and has a non-zero contribution.
+			// Store ray parameters and unoccluded radiance, weighted by path throughput.
+			path.flags |= (uint(PathFlags::shadowRay) << 0);
+			shadowRay.rayParams = float4(ls.rayDir, ls.rayDistance);
+			shadowRay.Lr = Lr;
+			return true;
+		}
+	}
+	return false;
+}
+
+/** Traces a shadow ray towards a light source.
+    \param[in] origin Ray origin for the shadow ray.
+    \param[in] dir Direction from ray origin towards the light source (normalized).
+    \param[in] distance Distance to the light source.
+    \param[in] valid True if ray should be traced, false for dummy rays.
+    \return True if light is visible, false otherwise.
+*/
+bool traceShadowRay(float3 origin, float3 dir, float distance, bool valid = true)
+{
+    // Setup ray descriptor.
+    RayDesc ray;
+    ray.Origin = origin;
+    ray.Direction = dir;
+    ray.TMin = 0.f;
+    ray.TMax = valid ? distance : 0.f; // Set tmax = 0.0 for dummy rays.
+
+    ShadowRayData rayData = { false }; // Set to true by miss shader if ray is not terminated before
+    uint rayFlags = RAY_FLAG_SKIP_CLOSEST_HIT_SHADER | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH;
+    if (kForceOpaque) rayFlags |= RAY_FLAG_FORCE_OPAQUE;
+    TraceRay(gRtScene, rayFlags, 0xff /* instanceInclusionMask */, kRayTypeShadow /* hitIdx */, hitProgramCount, kRayTypeShadow /* missIdx */, ray, rayData);
+
+    // We let TraceRay() execute even when !valid in order to run the miss shader.
+    // This is faster on current drivers thanks to reduced divergence.
+    if (!valid) return false;
+
+    // Note we're not counting stats for dummy rays. TODO: Make a separate bin in the logger.
+    logTraceRay(PixelStatsRayType::Shadow);
+
+    return rayData.visible;
 }
 
 float3 evalColor(in uint xi, in float2 u, in float pdf, ShadingData sd)
 {
-    SceneLightSample ls;
-    const float3 rayOrigin = sd.computeNewRayOrigin();
-    SampleGenerator Sg = SampleGenerator.create(uint2(0, 0), 1);
-    getLightSample(xi, u, pdf, sd, rayOrigin, Sg, ls);
-    float3 Lr = evalBSDFCosine(sd, ls.dir) * ls.Li;
+	SceneLightSample ls;
+	const float3 rayOrigin = sd.computeNewRayOrigin();
+	SampleGenerator Sg = SampleGenerator.create(uint2(0, 0), 1);
+	getLightSample(xi, u, pdf, sd, rayOrigin, Sg, ls);
+	float3 Lr = evalBSDFCosine(sd, ls.dir) * ls.Li;
 
-    return Lr;
+	return Lr;
 }
 
 // float evalPHat(in uint xi, in float2 u, ShadingData sd, inout PathData path)
 // {
-//     SceneLightSample ls;
-//     getLightSample(xi, u, sd, path.origin, path.sg, ls);
-//     float3 Lr = evalBSDFCosine(sd, ls.dir) * ls.Li;
-//     float PHat = length(Lr);
-//     return PHat;
+//	 SceneLightSample ls;
+//	 getLightSample(xi, u, sd, path.origin, path.sg, ls);
+//	 float3 Lr = evalBSDFCosine(sd, ls.dir) * ls.Li;
+//	 float PHat = length(Lr);
+//	 return PHat;
 // }
 
 float evalPHat(in uint xi, in float2 u, in float pdf, ShadingData sd)
 {
-    float3 Lr = evalColor(xi, u, pdf, sd);
-    float PHat = length(Lr);
-    if (isnan(PHat) || isinf(PHat)) PHat = 0;
-    return PHat;
+	float3 Lr = evalColor(xi, u, pdf, sd);
+	float PHat = length(Lr);
+	if (isnan(PHat) || isinf(PHat)) PHat = 0;
+	return PHat;
 }
 
 bool update<S : ISampleGenerator>(inout float4 res, uint xi, float w, inout S sg)
@@ -229,42 +281,61 @@ bool update<S : ISampleGenerator>(inout float4 res, uint xi, float w, inout S sg
 	res.g += w;
 	res.b += 1;
 	if (sampleNext1D(sg) < (w / res.g))
-    {
+	{
 		res.r = xi;
-        return true;
-    }
-    return false;
+		return true;
+	}
+	return false;
 }
 
 float4 RIS(EmissivePowerSampler emissiveSampler, ShadingData sd, inout PathData path, const uint count, out float2 uFinal, out float pdfFinal)
 {
 	float4 r = float4(0.0f);
 	uint xi = 0;
-    float2 u = 0;
-    float pdf = 0;
+	float2 u = 0;
+	float pdf = 0;
 	float PHat = 0;
-    float PHatFinal = 0;
-    uFinal = 0;
-    pdfFinal = 0;
-    uint TotalLightCount = gScene.getLightCount() + gScene.lightCollection.triangleCount;
+	float PHatFinal = 0;
+	uFinal = 0;
+	pdfFinal = 0;
+	uint TotalLightCount = gScene.getLightCount() + gScene.lightCollection.triangleCount;
+
+	float p[3];
+	p[0] = 0.0f;
+	p[1] = gScene.getLightCount() > 0 ? 1.f : 0.f;
+	p[2] = gScene.lightCollection.triangleCount? 1.f : 0.f;
+
+	// Normalize probabilities. Early out if zero.
+	float sum = p[0] + p[1] + p[2];
+	if (sum == 0.f) return float(0.0f);
+
+	float invSum = 1.f / sum;
+	p[0] *= invSum;
+	p[1] *= invSum;
+	p[2] *= invSum;
+
 	for(int i = 0; i < count; i++)
 	{
-		xi = min(sampleNext1D(path.sg) * TotalLightCount, TotalLightCount - 1);
-        u = sampleNext2D(path.sg);
-        pdf = 0;
-        if (xi >= gScene.getLightCount())
-        {
-            importanceSampleEmissive(emissiveSampler, xi, u, pdf, path.origin, path.sg);
-            xi += gScene.getLightCount();
-        }
+		//xi = min(sampleNext1D(path.sg) * TotalLightCount, TotalLightCount - 1);
+		if (sampleNext1D(path.sg) < p[1])
+			xi = min(sampleNext1D(path.sg) * gScene.getLightCount(), gScene.getLightCount() - 1);
+		else
+			xi = min(sampleNext1D(path.sg) * gScene.lightCollection.triangleCount, gScene.lightCollection.triangleCount - 1) + gScene.getLightCount();
+		u = sampleNext2D(path.sg);
+		pdf = 0;
+		if (xi >= gScene.getLightCount())
+		{
+			importanceSampleEmissive(emissiveSampler, xi, u, pdf, path.origin, path.sg);
+			xi += gScene.getLightCount();
+		}
 		PHat = evalPHat(xi, u, pdf, sd);
 		
 		if (update(r, xi, PHat, path.sg))
-        {
-            PHatFinal = PHat;
-            uFinal = u;
-            pdfFinal = pdf;
-        }
+		{
+			PHatFinal = PHat;
+			uFinal = u;
+			pdfFinal = pdf;
+		}
 	}
 	xi = r.r;
 
@@ -273,37 +344,37 @@ float4 RIS(EmissivePowerSampler emissiveSampler, ShadingData sd, inout PathData 
 	return r;
 }
 
-float4 CombineReservoirs<S : ISampleGenerator>(ShadingData sd, inout S sg, in float4 res[8], in float2 uArray[8], in float pdfArray[8], uint resCount, out float2 uFinal, out float pdfFinal)
+float4 CombineReservoirs<S : ISampleGenerator>(ShadingData sd, inout S sg, in ReservoirInfo resInfo[8], uint resCount, out float2 uFinal, out float pdfFinal)
 {
-	float4 s = float4(0.0f);	
+	float4 s = float4(0.0f);
 	float M = 0;
 	uint xi = 0;
-    float2 u = 0;
-    float pdf = 0;
+	float2 u = 0;
+	float pdf = 0;
 	float PHat = 0;
-    float PHatFinal = 0;
-    uFinal = 0;
-    pdfFinal = 0;
+	float PHatFinal = 0;
+	uFinal = 0;
+	pdfFinal = 0;
 	for(int i = 0; i < resCount; i++)
 	{
-		//res[i].b = min (20.f * res[0].b, res[i].b);
-		if (20.f * res[0].b < res[i].b)
+		//resInfo[i].res.b = min (20.f * res[0].b, resInfo[i].res.b);
+		if (20.f * resInfo[0].Res.b < resInfo[i].Res.b)
 		{
-			res[i].b = 20.f * res[0].b;
-			res[i].g *= 20.f * res[0].b / res[i].b;
+			resInfo[i].Res.b = 20.f * resInfo[0].Res.b;
+			resInfo[i].Res.g *= 20.f * resInfo[0].Res.b / resInfo[i].Res.b;
 		}
-		xi = res[i].r;
-        u = uArray[i];
-        pdf = pdfArray[i];
+		xi = resInfo[i].Res.r;
+		u = resInfo[i].u;
+		pdf = resInfo[i].pdf;
 		PHat = evalPHat(xi, u, pdf, sd);
 		
-		if (update(s, res[i].r, PHat * res[i].a * res[i].b, sg))
-        {
-            PHatFinal = PHat;
-            uFinal = u;
-            pdfFinal = pdf;
-        }
-		M += res[i].b;
+		if (update(s, resInfo[i].Res.r, PHat * resInfo[i].Res.a * resInfo[i].Res.b, sg))
+		{
+			PHatFinal = PHat;
+			uFinal = u;
+			pdfFinal = pdf;
+		}
+		M += resInfo[i].Res.b;
 	}
 	xi = s.r;
 	s.b = M;
@@ -314,141 +385,161 @@ float4 CombineReservoirs<S : ISampleGenerator>(ShadingData sd, inout S sg, in fl
 	return s;
 }
 
-// float4 CombineResservoirsUnbiased(ShadingData sd, float4 res[8], float3 q[8], uint resCount, SampleGenerator sg)
-// {
-// 	float4 s = float4(0.0f);	
-// 	float M = 0;
-// 	uint xi = 0;
-// 	float PHat = 0;
-// 	float Z = 0;
-// 	for(int i = 0; i < resCount; i++)
-// 	{
-// 		//res[i].b = min (20.f * res[0].b, res[i].b);
-// 		if (20.f * res[0].b < res[i].b)
-// 		{
-// 			res[i].b = 20.f * res[0].b;
-// 			res[i].g *= 20.f * res[0].b / res[i].b;
-// 		}
-// 		xi = res[i].r;
-// 		PHat = evalPHat(sd, xi);
-// 		//if (PHat > 0) Z += res[i].b;
-// 		update(s, res[i].r, PHat * res[i].a * res[i].b, sg);
-// 		M += res[i].b;
-// 	}
-// 	s.b = M;
+float4 CombineResservoirsUnbiased<S : ISampleGenerator>(ShadingData sd, inout S sg, in ReservoirInfo resInfo[8], uint resCount, out float2 uFinal, out float pdfFinal)
+{
+	float4 s = float4(0.0f);
+	float M = 0;
+	uint xi = 0;
+	float2 u = 0;
+	float pdf = 0;
+	float PHat = 0;
+	float PHatFinal = 0;
+	uFinal = 0;
+	pdfFinal = 0;
+	for(int i = 0; i < resCount; i++)
+	{
+		//resInfo[i].res.b = min (20.f * res[0].b, resInfo[i].res.b);
+		if (20.f * resInfo[0].Res.b < resInfo[i].Res.b)
+		{
+			resInfo[i].Res.b = 20.f * resInfo[0].Res.b;
+			resInfo[i].Res.g *= 20.f * resInfo[0].Res.b / resInfo[i].Res.b;
+		}
+		xi = resInfo[i].Res.r;
+		u = resInfo[i].u;
+		pdf = resInfo[i].pdf;
+		PHat = evalPHat(xi, u, pdf, sd);
 
-// 	for (int i = 0; i < resCount; i++)
-// 	{
-// 		if (!checkLightHit(q[i], gScene.getLight(s.r).posW))
-// 			Z += res[i].b;
-// 	}
-// 	xi = s.r;
-// 	PHat = evalPHat(sd, xi);
-// 	// float m = min(1 / Z, 1);
-// 	if (Z < 1) Z = M;
+		if (update(s, resInfo[i].Res.r, PHat * resInfo[i].Res.a * resInfo[i].Res.b, sg))
+		{
+			PHatFinal = PHat;
+			uFinal = u;
+			pdfFinal = pdf;
+		}
+		M += resInfo[i].Res.b;
+	}
+	s.b = M;
+	xi = s.r;
+	SceneLightSample ls;
+	const float3 rayOrigin = sd.computeNewRayOrigin();
+	float3 LightPos = float3(0.0);
+	if (getLightSample(xi, uFinal, pdfFinal, sd, rayOrigin, sg, ls))
+	{
+		LightPos = rayOrigin + ls.dir * ls.distance;
+	}
+	float Z = 0;
+	for (int i = 0; i < resCount; i++)
+	{
+		float3 Dir = normalize(LightPos - resInfo[i].Pos);
+		float Distance = length(LightPos - resInfo[i].Pos);
+		//bool valid = generateReSTIRShadowRay(sd, path, path.sg, shadowRay, xi, u, pdf);
+		//if (traceShadowRay(resInfo[i].Pos, Dir, Distance))
+		
+		Z += resInfo[i].Res.b;
+	}
 	
-// 	//s.a = 1 / max(PHat, 0.0001f) * (s.g / max(Z, res[0].b));
-// 	s.a = 1 / max(PHat, 0.0001f) * (s.g / Z);
+	if (Z < 1) Z = M;
+	
+	//s.a = 1 / max(PHat, 0.0001f) * (s.g / max(Z, res[0].b));
+	s.a = 1 / max(PHatFinal, 0.0001f) * (s.g / Z);
 
-
-// 	return s;
-// }
+	return s;
+}
 
 // bool sampleReSTIRSceneLights<S : ISampleGenerator>(const PathTracerParams params, const EnvMapSampler envMapSampler, const EmissiveLightSampler emissiveSampler, const ShadingData sd, const float3 rayOrigin, const uint numSamples, inout S sg, out SceneLightSample ls)
 // {
-//     // Set relative probabilities of the different sampling techniques.
-//     // TODO: These should use estimated irradiance from each light type. Using equal probabilities for now.
-//     // TODO: Refactor the selection pdf code the helpers above for evaluating the individual probabilities.
-//     float p[3];
-//     p[0] = kUseEnvLight ? 1.f : 0.f;
-//     p[1] = kUseAnalyticLights ? 1.f : 0.f;
-//     p[2] = kUseEmissiveLights ? 1.f : 0.f;
+//	 // Set relative probabilities of the different sampling techniques.
+//	 // TODO: These should use estimated irradiance from each light type. Using equal probabilities for now.
+//	 // TODO: Refactor the selection pdf code the helpers above for evaluating the individual probabilities.
+//	 float p[3];
+//	 p[0] = kUseEnvLight ? 1.f : 0.f;
+//	 p[1] = kUseAnalyticLights ? 1.f : 0.f;
+//	 p[2] = kUseEmissiveLights ? 1.f : 0.f;
 
-//     // Normalize probabilities. Early out if zero.
-//     float sum = p[0] + p[1] + p[2];
-//     if (sum == 0.f) return false;
+//	 // Normalize probabilities. Early out if zero.
+//	 float sum = p[0] + p[1] + p[2];
+//	 if (sum == 0.f) return false;
 
-//     float invSum = 1.f / sum;
-//     p[0] *= invSum;
-//     p[1] *= invSum;
-//     p[2] *= invSum;
+//	 float invSum = 1.f / sum;
+//	 p[0] *= invSum;
+//	 p[1] *= invSum;
+//	 p[2] *= invSum;
 
-//     // Sample based on uniform random number. Rescale u to [0,1) afterwards.
-//     float invPdf = 0.f;
-//     float u = sampleNext1D(sg);
+//	 // Sample based on uniform random number. Rescale u to [0,1) afterwards.
+//	 float invPdf = 0.f;
+//	 float u = sampleNext1D(sg);
 
-//     // We use explicit checks for which light types are enabled so that the compiler
-//     // can remove the unused code. It won't otherwise since u is unknown at compile time.
+//	 // We use explicit checks for which light types are enabled so that the compiler
+//	 // can remove the unused code. It won't otherwise since u is unknown at compile time.
 
-//     if (kUseAnalyticLights)
-//     {
-//         if (u < p[1])
-//         {
-//             // Sample analytic light source selected uniformly from the light list.
-//             // TODO: Sample based on estimated contributions as pdf.
-//             u /= p[1]; // Rescale to [0,1)
-//             uint lightCount = gScene.getLightCount();
-//             uint lightIndex = min(uint(u * lightCount), lightCount - 1);
-//             float selectionPdf = p[1] / lightCount; // TODO: Precompute 1.f/lightCount in cbuffer
+//	 if (kUseAnalyticLights)
+//	 {
+//		 if (u < p[1])
+//		 {
+//			 // Sample analytic light source selected uniformly from the light list.
+//			 // TODO: Sample based on estimated contributions as pdf.
+//			 u /= p[1]; // Rescale to [0,1)
+//			 uint lightCount = gScene.getLightCount();
+//			 uint lightIndex = min(uint(u * lightCount), lightCount - 1);
+//			 float selectionPdf = p[1] / lightCount; // TODO: Precompute 1.f/lightCount in cbuffer
 
-//             // Sample local light source.
-//             AnalyticLightSample lightSample;
-//             bool valid = sampleLight(rayOrigin, gScene.getLight(lightIndex), sg, lightSample);
+//			 // Sample local light source.
+//			 AnalyticLightSample lightSample;
+//			 bool valid = sampleLight(rayOrigin, gScene.getLight(lightIndex), sg, lightSample);
 
-//             // Reject sample if lower hemisphere.
-//             if (!valid || dot(sd.N, lightSample.dir) < kMinCosTheta) return false;
+//			 // Reject sample if lower hemisphere.
+//			 if (!valid || dot(sd.N, lightSample.dir) < kMinCosTheta) return false;
 
-//             // Setup returned sample.
-//             // Analytic lights do not currently have a geometric representation in the scene.
-//             // Do not worry about adjusting the ray to avoid self-intersections at the light.
-//             ls.rayDir = ls.dir = lightSample.dir;
-//             ls.rayDistance = ls.distance = lightSample.distance;
-//             ls.pdf = selectionPdf * lightSample.pdf;
-//             ls.Li = lightSample.Li / (selectionPdf * numSamples);
+//			 // Setup returned sample.
+//			 // Analytic lights do not currently have a geometric representation in the scene.
+//			 // Do not worry about adjusting the ray to avoid self-intersections at the light.
+//			 ls.rayDir = ls.dir = lightSample.dir;
+//			 ls.rayDistance = ls.distance = lightSample.distance;
+//			 ls.pdf = selectionPdf * lightSample.pdf;
+//			 ls.Li = lightSample.Li / (selectionPdf * numSamples);
 
-//             return true;
-//         }
-//         u -= p[1];
-//     }
+//			 return true;
+//		 }
+//		 u -= p[1];
+//	 }
 
-//     if (kUseEmissiveLights)
-//     {
-//         //if (u < p[2]) // Always true
-//         {
-//             float selectionPdf = p[2];
+//	 if (kUseEmissiveLights)
+//	 {
+//		 //if (u < p[2]) // Always true
+//		 {
+//			 float selectionPdf = p[2];
 
-//             // Sample emissive lights.
-//             TriangleLightSample lightSample;
-//             bool valid = emissiveSampler.sampleLight(rayOrigin, sd.N, true, sg, lightSample);
+//			 // Sample emissive lights.
+//			 TriangleLightSample lightSample;
+//			 bool valid = emissiveSampler.sampleLight(rayOrigin, sd.N, true, sg, lightSample);
 
-//             // Reject sample if lower hemisphere.
-//             if (!valid || dot(sd.N, lightSample.dir) < kMinCosTheta) return false;
+//			 // Reject sample if lower hemisphere.
+//			 if (!valid || dot(sd.N, lightSample.dir) < kMinCosTheta) return false;
 
-//             // Evaluate MIS with BRDF sampling as the other sampling strategy.
-//             float pdf = selectionPdf * lightSample.pdf;
-//             float misWeight = 1.f;
-//             if (kUseMIS && pdf > 0.f)
-//             {
-//                 float brdfPdf = evalPdfScatter(sd, lightSample.dir);
-//                 misWeight = evalMIS(params, numSamples, pdf, 1, brdfPdf);
-//             }
+//			 // Evaluate MIS with BRDF sampling as the other sampling strategy.
+//			 float pdf = selectionPdf * lightSample.pdf;
+//			 float misWeight = 1.f;
+//			 if (kUseMIS && pdf > 0.f)
+//			 {
+//				 float brdfPdf = evalPdfScatter(sd, lightSample.dir);
+//				 misWeight = evalMIS(params, numSamples, pdf, 1, brdfPdf);
+//			 }
 
-//             // Compute offset light sample position to reduce self-intersections at the light.
-//             // We compute the shadow ray parameters based on the offset position.
-//             float3 offsetPos = computeRayOrigin(lightSample.posW, lightSample.normalW);
-//             float3 toLight = offsetPos - rayOrigin;
-//             ls.rayDistance = length(toLight);
-//             ls.rayDir = normalize(toLight);
+//			 // Compute offset light sample position to reduce self-intersections at the light.
+//			 // We compute the shadow ray parameters based on the offset position.
+//			 float3 offsetPos = computeRayOrigin(lightSample.posW, lightSample.normalW);
+//			 float3 toLight = offsetPos - rayOrigin;
+//			 ls.rayDistance = length(toLight);
+//			 ls.rayDir = normalize(toLight);
 
-//             // Setup returned sample.
-//             ls.dir = lightSample.dir;
-//             ls.distance = lightSample.distance;
-//             ls.pdf = pdf;
-//             ls.Li = pdf > 0.f ? lightSample.Le * misWeight / (pdf * numSamples) : float3(0);
+//			 // Setup returned sample.
+//			 ls.dir = lightSample.dir;
+//			 ls.distance = lightSample.distance;
+//			 ls.pdf = pdf;
+//			 ls.Li = pdf > 0.f ? lightSample.Le * misWeight / (pdf * numSamples) : float3(0);
 
-//             return true;
-//         }
-//     }
+//			 return true;
+//		 }
+//	 }
 
-//     return false;
+//	 return false;
 // }

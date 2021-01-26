@@ -48,14 +48,12 @@ void rayGen()
                 // b : M
                 // a : W
                 
-                float4 Res2Combine[8];
+                ReservoirInfo Res2Combine[8];
                 //float3 PixelPos[8];
-                float2 uArray[8];
-                float pdfArray[8];
-                Res2Combine[0] = Reservoir;
-                uArray[0] = u;
-                pdfArray[0] = pdf;
-
+                Res2Combine[0].Res = Reservoir;
+                Res2Combine[0].u = u;
+                Res2Combine[0].pdf = pdf;
+                Res2Combine[0].Pos = gWorldPosition[LaunchIndex].xyz;
                 //PixelPos[0] = WorldPos.xyz;
                 for(int k = 0; k < NeighborCount && k < 7; k++)
                 {
@@ -66,18 +64,19 @@ void rayGen()
                     NeighborRes = ReservoirTemporal[uint3(NeighborIndex,i)];	
                     Neighboru = uFinalTemporal[uint3(NeighborIndex,i)].xy;
                     NeighborPdf = uFinalTemporal[uint3(NeighborIndex,i)].z;
-                    Res2Combine[k + 1] = NeighborRes;
-                    uArray[k + 1] = Neighboru;
-                    pdfArray[k + 1] = NeighborPdf;
-                    //PixelPos[k + 1] = Pos[NeighborIndex].xyz;
+                    Res2Combine[k + 1].Res = NeighborRes;
+                    Res2Combine[k + 1].u = Neighboru;
+                    Res2Combine[k + 1].pdf = NeighborPdf;
+                    Res2Combine[k + 1].Pos = gWorldPosition[NeighborIndex].xyz;
                 }
 
-                // if (Unbiased)
-                // {
-                //     SpatialRes = CombineResservoirsUnbiased(Sd, Res2Combine, PixelPos, min(NeighborCount, 7) + 1, Sg);
-                // }
-                // else
-                SpatialRes = CombineReservoirs(sd, Sg, Res2Combine, uArray, pdfArray, min(NeighborCount, 7) + 1, u, pdf);
+                if (Unbiased)
+                {
+                    SpatialRes = CombineResservoirsUnbiased(sd, Sg,Res2Combine, min(NeighborCount, 7) + 1, u, pdf);
+                    //SpatialRes = CombineReservoirs(sd, Sg, Res2Combine, min(NeighborCount, 7) + 1, u, pdf);
+                }
+                else
+                    SpatialRes = CombineReservoirs(sd, Sg, Res2Combine, min(NeighborCount, 7) + 1, u, pdf);
 
                 ReservoirSpatial[uint3(LaunchIndex, i)] = SpatialRes;	
                 uFinalSpatial[uint3(LaunchIndex, i)] = float4(u, pdf, 1.0f);
@@ -92,16 +91,16 @@ void rayGen()
             u = uFinalSpatial[uint3(LaunchIndex, i)].xy;
             pdf = uFinalSpatial[uint3(LaunchIndex, i)].z;
             xi = Reservoir.r;
-            ReservoirPrev[uint3(LaunchIndex, i)] = Reservoir; // Update reservoir value to be used for next pass
             uFinalPrev[uint3(LaunchIndex, i)] = float4(u, pdf, 1.0f);
             float3 Color = evalColor(xi, u, pdf, sd) * Reservoir.w;
             if (isnan(length(Color)) || isinf(length(Color))) Color = float3(0, 0, 0);
             ShadeColor += Color;
-            // if (!Unbiased)
-            //     ReservoirPrev[uint3(LaunchIndex, i)] = Reservoir;
+            //if (!Unbiased)
+                ReservoirPrev[uint3(LaunchIndex, i)] = Reservoir;
         }
         ShadeColor /= (float)ReservoirPerPixel;
         ShadeColor += gMaterialEmissive[LaunchIndex].xyz;
+        PrevPos[LaunchIndex] = gWorldPosition[LaunchIndex]; 
         //ShadeColor = ShadeColor > 10.0f ? 10.0f : ShadeColor;
     }
 	gOutputColor[LaunchIndex] = float4(ShadeColor, 1.f);

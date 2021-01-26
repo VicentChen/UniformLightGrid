@@ -73,6 +73,7 @@ private:
     uint32_t m_ReservoirPerPixel = 4;
     uint32_t m_NeighborCount = 5;
     uint32_t m_FrameCount = 0;
+    bool m_Unbiased = false;
     float m_NeighborsRange = 30.f;
     bool m_IsTemporalReuse = true;
     bool m_IsUseMotionVector = true;

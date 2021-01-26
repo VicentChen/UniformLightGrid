@@ -1,0 +1,191 @@
+#include "Utils/Math/MathConstants.slangh"
+import Scene.Scene;
+import Scene.Shading;
+import Scene.Raster;
+import Scene.Raytracing;
+import Scene.Lights.Lights;
+import Utils.Sampling.SampleGenerator;
+import Scene.Material.BRDF;
+
+// r : y
+// g : weight sum
+// b : M
+// a : W
+
+
+struct ShadowRayData
+{
+	bool hit;
+};
+
+
+[shader("miss")]
+void shadowMiss(inout ShadowRayData hitData)
+{
+	hitData.hit = false;
+}
+
+[shader("anyhit")]
+void shadowAnyHit(inout ShadowRayData hitData, in BuiltInTriangleIntersectionAttributes attribs)
+{
+	hitData.hit = true;
+}
+
+bool checkLightHit(float3 posW, float3 lightPosW)
+{
+	RayDesc Ray;
+	Ray.Origin = posW;
+	Ray.Direction = normalize(lightPosW - posW);
+	Ray.TMin = 0.01f;
+	Ray.TMax = distance(lightPosW, posW) - 0.01f;
+
+	ShadowRayData LightHit;
+
+	TraceRay(gRtScene, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 0xFF, 0, hitProgramCount, 0, Ray, LightHit);
+
+	return LightHit.hit;
+}
+
+struct ResVertexData
+{
+	float3 Pos = 0;
+	float3 Normal = 0;
+	float3 DiffColor = 0;
+	float3 SpecColor = 0;
+	float LinearRoughness = 0;
+	// float3 T = 0;
+	// float3 B = 0; 
+}
+
+ShadingData prepareResShadingData(ResVertexData vData, float3 viewDir)
+{
+	ShadingData Sd = {};
+	Sd.N = vData.Normal;
+	Sd.V = normalize(viewDir);
+	Sd.NdotV = dot(Sd.V, Sd.N);
+	Sd.linearRoughness = vData.LinearRoughness;
+	Sd.ggxAlpha = vData.LinearRoughness * vData.LinearRoughness;
+	Sd.diffuse = vData.DiffColor;
+	Sd.specular = vData.SpecColor;
+	Sd.posW = vData.Pos;
+	// Sd.T = vData.T;
+	// Sd.B = vData.B;
+
+	return Sd;
+}
+
+void update(inout float4 res, uint xi, float w, SampleGenerator sg)
+{
+	res.g += w;
+	res.b += 1;
+	if (sampleNext1D(sg) < (w / res.g))
+		res.r = xi;
+}
+
+float evalPHat(ShadingData sd, uint xi)
+{
+	LightSample Ls = evalLight(gScene.getLight(xi), sd);
+	
+	if (Ls.NdotL < 0) return 0;
+	float3 BRDF = evalSpecularBrdf(sd, Ls);
+	float PHat = 0;
+	// LambertBrdf
+	float3 ShadingResult = Ls.diffuse * Ls.NdotL * sd.diffuse / M_PI;
+	float3 SpecTerm = Ls.specular * Ls.NdotL * BRDF;
+	// avoid NAN
+	if (SpecTerm.x < 10.f && SpecTerm.y < 10.f && SpecTerm.z < 10.f)
+		//PHat += length(SpecTerm);
+		ShadingResult += SpecTerm;
+	PHat = length(ShadingResult);
+	return PHat;
+}
+
+float4 RIS(ShadingData sd, uint count, SampleGenerator sg)
+{
+	float4 r = float4(0.0f);
+	uint xi = 0;
+	float PHat = 0;
+	for(int i = 0; i < count; i++)
+	{
+		xi = min(sampleNext1D(sg) * gScene.getLightCount(), gScene.getLightCount() - 1);
+		PHat = evalPHat(sd, xi);
+		
+		update(r, xi, PHat, sg);
+	}
+	xi = r.r;
+	
+	PHat = evalPHat(sd, xi);
+	
+	r.a = 1 / max(PHat, 0.0001f) * (r.g / max(r.b, 0.0001f));
+
+	return r;
+}
+
+float4 CombineReservoirs(ShadingData sd, float4 res[8], uint resCount, SampleGenerator sg)
+{
+	float4 s = float4(0.0f);	
+	float M = 0;
+	uint xi = 0;
+	float PHat = 0;
+	for(int i = 0; i < resCount; i++)
+	{
+		//res[i].b = min (20.f * res[0].b, res[i].b);
+		if (20.f * res[0].b < res[i].b)
+		{
+			res[i].b = 20.f * res[0].b;
+			res[i].g *= 20.f * res[0].b / res[i].b;
+		}
+		xi = res[i].r;
+		PHat = evalPHat(sd, xi);
+		
+		update(s, res[i].r, PHat * res[i].a * res[i].b, sg);
+		M += res[i].b;
+	}
+	xi = s.r;
+	s.b = M;
+	PHat = evalPHat(sd, xi);
+	
+	s.a = 1 / max(PHat, 0.0001f) * (s.g / max(s.b, 0.0001f));
+
+	return s;
+}
+
+float4 CombineResservoirsUnbiased(ShadingData sd, float4 res[8], float3 q[8], uint resCount, SampleGenerator sg)
+{
+	float4 s = float4(0.0f);	
+	float M = 0;
+	uint xi = 0;
+	float PHat = 0;
+	float Z = 0;
+	for(int i = 0; i < resCount; i++)
+	{
+		//res[i].b = min (20.f * res[0].b, res[i].b);
+		if (20.f * res[0].b < res[i].b)
+		{
+			res[i].b = 20.f * res[0].b;
+			res[i].g *= 20.f * res[0].b / res[i].b;
+		}
+		xi = res[i].r;
+		PHat = evalPHat(sd, xi);
+		//if (PHat > 0) Z += res[i].b;
+		update(s, res[i].r, PHat * res[i].a * res[i].b, sg);
+		M += res[i].b;
+	}
+	s.b = M;
+
+	for (int i = 0; i < resCount; i++)
+	{
+		if (!checkLightHit(q[i], gScene.getLight(s.r).posW))
+			Z += res[i].b;
+	}
+	xi = s.r;
+	PHat = evalPHat(sd, xi);
+	// float m = min(1 / Z, 1);
+	if (Z < 1) Z = M;
+	
+	//s.a = 1 / max(PHat, 0.0001f) * (s.g / max(Z, res[0].b));
+	s.a = 1 / max(PHat, 0.0001f) * (s.g / Z);
+
+
+	return s;
+}

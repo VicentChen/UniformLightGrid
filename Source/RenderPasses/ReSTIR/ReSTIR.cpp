@@ -59,6 +59,7 @@ namespace
     const std::string kuFinalPrev = "uFInalPrev";
     const std::string kuFinalTemporal = "uFinalTemporal";
     const std::string kuFinalSpatial = "uFinalSpatial";
+    const std::string kPrevPos = "Previous posW";
 
     // Input
     const std::string kMotionVector = "MotionVec";
@@ -137,6 +138,7 @@ void ReSTIR::execute(RenderContext* pRenderContext, const RenderData& renderData
     Texture::SharedPtr puFinalSpatial = renderData[kuFinalSpatial]->asTexture();
     Texture::SharedPtr pOutputColor = renderData[kColorOutput]->asTexture();
     Texture::SharedPtr pMotionVector = renderData[kMotionVector]->asTexture();
+    Texture::SharedPtr pPrevPos = renderData[kPrevPos]->asTexture();
     pRenderContext->clearTexture(pOutputColor.get());
     if (m_IsClearPrev)
     {
@@ -231,12 +233,14 @@ void ReSTIR::execute(RenderContext* pRenderContext, const RenderData& renderData
         mTracer.pVars["uFinalPrev"] = puFinalPrev;
         mTracer.pVars["uFinalTemporal"] = puFinalTemporal;
         mTracer.pVars["MotionVector"] = pMotionVector;
+        mTracer.pVars["PrevPos"] = pPrevPos;
         mTracer.pVars["PerFrameCB"]["CandidateCount"] = m_CandidateCount;
         mTracer.pVars["PerFrameCB"]["ReservoirPerPixel"] = m_ReservoirPerPixel;
         mTracer.pVars["PerFrameCB"]["IsTemporalReuse"] = m_IsTemporalReuse;
         mTracer.pVars["PerFrameCB"]["IsInitLight"] = IsInitLight;
         mTracer.pVars["PerFrameCB"]["LastCameraMatrix"] = m_LastCameraMatrix;
         mTracer.pVars["PerFrameCB"]["IsUseMotionVector"] = m_IsUseMotionVector;
+        mTracer.pVars["PerFrameCB"]["Unbiased"] = m_Unbiased;
         mpScene->raytrace(pRenderContext, mTracer.pProgram.get(), mTracer.pVars, uint3(targetDim, 1));
     }
 
@@ -252,6 +256,7 @@ void ReSTIR::execute(RenderContext* pRenderContext, const RenderData& renderData
         m_FinalTracer.pVars["uFinalTemporal"] = puFinalTemporal;
         m_FinalTracer.pVars["uFinalSpatial"] = puFinalSpatial;
         m_FinalTracer.pVars["MotionVector"] = pMotionVector;
+        m_FinalTracer.pVars["PrevPos"] = pPrevPos;
         m_FinalTracer.pVars["PerFrameCB"]["CandidateCount"] = m_CandidateCount;
         m_FinalTracer.pVars["PerFrameCB"]["ReservoirPerPixel"] = m_ReservoirPerPixel;
         m_FinalTracer.pVars["PerFrameCB"]["IsTemporalReuse"] = m_IsTemporalReuse;
@@ -259,6 +264,7 @@ void ReSTIR::execute(RenderContext* pRenderContext, const RenderData& renderData
         m_FinalTracer.pVars["PerFrameCB"]["NeighborCount"] = m_NeighborCount;
         m_FinalTracer.pVars["PerFrameCB"]["NeighborsRange"] = m_NeighborsRange;
         m_FinalTracer.pVars["PerFrameCB"]["FrameCount"] = m_FrameCount++;
+        m_FinalTracer.pVars["PerFrameCB"]["Unbiased"] = m_Unbiased;
         m_FinalTracer.pVars["gOutputColor"] = pOutputColor;
 
         mpScene->raytrace(pRenderContext, m_FinalTracer.pProgram.get(), m_FinalTracer.pVars, uint3(targetDim, 1));
@@ -357,6 +363,7 @@ void ReSTIR::renderUI(Gui::Widgets& widget)
     widget.var("Neighbor Count", m_NeighborCount, 1u, 7u);
     widget.var("Neighbor Range", m_NeighborsRange, 1.f, 100.f, 1.f);
     if (widget.checkbox("Temporal reuse?", m_IsTemporalReuse)) m_IsClearPrev = true;
+    widget.checkbox("Unbiased", m_Unbiased);
     widget.checkbox("Spatial reuse?", m_IsSpatialReuse);
     widget.checkbox("Use Motion Vector?", m_IsUseMotionVector);
     PathTracer::renderUI(widget);
