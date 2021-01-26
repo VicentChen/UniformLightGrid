@@ -2,6 +2,7 @@
 #include "GridData.slangh"
 import Utils.Math.AABB;
 import Utils.Math.BitTricks;
+import Utils.Sampling.SampleGenerator; // TODO: remove this import
 
 StructuredBuffer<LeafNode> gLeafNodes;
 StructuredBuffer<InternalNode> gInternalNodes;
@@ -131,6 +132,107 @@ UniformGrid traverseTreeForGird(uint mortonCode)
             // Right child
             currNodeId = rChild;
             isLeaf = isRChildLeaf;
+        }
+
+        // stop if child is leaf
+        if (isLeaf)
+        {
+            buildGridByLeafNode(currNodeId, grid);
+            break;
+        }
+        else
+        {
+            currNode = gInternalNodes[currNodeId];
+        }
+    }
+
+    return grid;
+}
+
+UniformGrid traverseTreeForGird<S : ISampleGenerator>(float3 dir, float3 pos, out float pdf, inout S sg)
+{
+    UniformGrid grid = {};
+    uint currNodeId = 0;
+    InternalNode currNode = gInternalNodes[currNodeId];
+    pdf = 1.f;
+    while (true)
+    {
+        // stop if current node size > grid size
+        // we have 32-bit integer and 30-bit morton code
+        if (currNode.commonPrefixLength > gridMortonCodePrefixLength + 2)
+        {
+            buildGridByInternalNode(currNodeId, grid);
+            break;
+        }
+
+        uint lChild = currNode.lChildId;
+        bool isLChildLeaf = currNode.isLChildLeaf;
+        float lChildIntensity = 0;
+        float lChildDis = 0;
+        float3 lChildPos = float3(0, 0, 0);
+        float3 lChildDir = float3(0, 0, 0);
+        if (isLChildLeaf)
+        {
+            lChildIntensity = length(gLeafNodes[lChild].intensity);
+            lChildPos = computePosByMortonCode(gLeafNodes[lChild].mortonCode, gridMortonCodePrefixLength);
+            lChildDir = normalize(lChildPos - pos);
+            lChildDis = length(lChildPos - pos);
+        }
+        else
+        {
+            lChildIntensity = length(gInternalNodes[lChild].intensity);
+            lChildPos = computePosByMortonCode(gInternalNodes[lChild].splitMortonCode, gInternalNodes[lChild].commonPrefixLength);
+            lChildDir = normalize(lChildPos - pos);
+            lChildDis = length(lChildPos - pos);
+        }
+
+        uint rChild = currNode.rChildId;
+        bool isRChildLeaf = currNode.isRChildLeaf;
+        float rChildIntensity = 0;
+        float rChildDis = 0;
+        float3 rChildPos = float3(0, 0, 0);
+        float3 rChildDir = float3(0, 0, 0);
+        if (isRChildLeaf)
+        {
+            rChildIntensity = length(gLeafNodes[rChild].intensity);
+            rChildPos = computePosByMortonCode(gLeafNodes[rChild].mortonCode, gridMortonCodePrefixLength);
+            rChildDir = normalize(lChildPos - pos);
+            rChildDis = length(lChildPos - pos);
+        }
+        else
+        {
+            rChildIntensity = length(gInternalNodes[rChild].intensity);
+            rChildPos = computePosByMortonCode(gInternalNodes[rChild].splitMortonCode, gInternalNodes[rChild].commonPrefixLength);
+            rChildDir = normalize(rChildPos - pos);
+            rChildDis = length(lChildPos - pos);
+        }
+        // choose one child
+        bool isLeaf = false;
+        //if (mortonCode <= currNode.splitMortonCode)
+        // dir intensity distance
+        // float pL = lChildIntensity * clamp(dot(dir, lChildDir), 0.0f, 1.f) / lChildDis / lChildDis;
+        // float pR = rChildIntensity * clamp(dot(dir, rChildDir), 0.0f, 1.f) / rChildDis / rChildDis;
+        // dir
+        // float pL = clamp(dot(dir, lChildDir), 0.0f, 1.f);
+        // float pR = clamp(dot(dir, rChildDir), 0.0f, 1.f);
+        // intensity distance
+        float pL = lChildIntensity / lChildDis / lChildDis;
+        float pR = rChildIntensity / rChildDis / rChildDis;
+        float p = max(pL + pR, 0.00001f);
+        if (sampleNext1D(sg) < pL / p)
+        //if (pL > pR)
+        {
+            // Left child
+            currNodeId = lChild;
+            isLeaf = isLChildLeaf;
+            pdf *= pL / p;
+        }
+        else
+        {
+            // Right child
+            currNodeId = rChild;
+            isLeaf = isRChildLeaf;
+            pdf *= pR / p;
         }
 
         // stop if child is leaf

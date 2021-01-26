@@ -134,8 +134,9 @@ void selectGridByBRDF<S : ISampleGenerator>(const ShadingData sd, inout S sg, ou
 
         UniformGrid grid = traverseTreeForGird(gridMortonCode);
 
-        // recompute BSDF
+        // recompute BSDF & distance
         float3 bsdf = evalBSDFCosine(sd, normalize(grid.pos - pos));
+        distance = length(grid.pos - pos);
 
         // ------------------------ BUG ------------------------ //
         // random choose by weight
@@ -153,6 +154,53 @@ void selectGridByBRDF<S : ISampleGenerator>(const ShadingData sd, inout S sg, ou
     chosenGridPdf = chosenGridWeight * samplesPerDirection / max(weightSum, 0.0001f);
         // ------------------------ BUG ------------------------ //
 }
+
+void selectGridByLightcuts<S : ISampleGenerator>(const ShadingData sd, inout S sg, out UniformGrid chosenGrid, out float chosenGridPdf)
+{
+    float3 pos = sd.posW;
+
+    // compute direction by bsdf
+    // TODO: randomly choose direction
+    BSDFSample bsdfSample;
+    sampleBSDF(sd, sg, bsdfSample);
+    float3 dir = bsdfSample.wi;
+    float dirPdf = bsdfSample.pdf;
+    chosenGrid = {};
+    chosenGridPdf = 1.0f;
+
+    // multiple grid selection
+    // TODO: make as a struct?
+    float3 chosenGridBSDF = 0;
+    float chosenGridDistance = 0;
+    float weightSum = 0;
+    for (int dirSampleIdx = 0; dirSampleIdx < samplesPerDirection; dirSampleIdx++)
+    {
+        // choose grid
+        float gridPdf = 1.f;
+        UniformGrid grid = traverseTreeForGird(dir, pos, gridPdf, sg);
+        gridPdf *= dirPdf;
+
+        // recompute BSDF & distance
+        float3 bsdf = evalBSDFCosine(sd, normalize(grid.pos - pos));
+        float  distance = length(grid.pos - pos);
+
+        // ------------------------ BUG ------------------------ //
+        // random choose by weight
+        float gridWeight = length(bsdf * grid.intensity) / (distance * distance) / gridPdf;
+        weightSum += gridWeight;
+        if (sampleNext1D(sg) < gridWeight / weightSum)
+        {
+            chosenGrid = grid;
+            chosenGridBSDF = bsdf;
+            chosenGridDistance = distance;
+        }
+    }
+
+    float chosenGridWeight = length(chosenGridBSDF * chosenGrid.intensity) / max((chosenGridDistance * chosenGridDistance), 0.0001f);
+    chosenGridPdf = chosenGridWeight * samplesPerDirection / max(weightSum, 0.0001f);
+        // ------------------------ BUG ------------------------ //
+}
+
 
 void selectGridByTree<S : ISampleGenerator>(const ShadingData sd, inout S sg, out UniformGrid chosenGrid, out float chosenGridPdf)
 {
@@ -243,6 +291,31 @@ void selectGridByTree<S : ISampleGenerator>(const ShadingData sd, inout S sg, ou
     chosenGrid = grid;
 }
 
+void chooseTriangle<S : ISampleGenerator>(in uint2 range, float3 dir, float3 pos, out uint triangleIdx, out float pdf, inout S sg)
+{
+    float weightSum = 0;
+    float pHat = 0;
+    float choosenPHat = 0;
+    pdf = 0;
+    triangleIdx = range.x;
+    for (int i = 0; i < 4; i++) //TODO:: make 4 a variable
+    {
+        uint idx = 0;
+        float delta = range.y - range.x + 1;
+        float x = sampleNext1D(sg) * 0.999999f; // FIXME: hack to avoid x == 1
+        idx = floor(range.x + x * delta);
+        LeafNode node = gLeafNodes[idx];
+        pHat = dot(normalize(node.debug.xyz - pos), dir) * length(node.intensity);
+        weightSum += pHat;
+        if (sampleNext1D(sg) < pHat / weightSum)
+        {
+            triangleIdx = idx;
+            choosenPHat = pHat;
+        }
+    }
+    pdf = choosenPHat * 4 / weightSum;
+}
+
 [numthreads(CHUNK_SIZE, CHUNK_SIZE, 1)]
 void selectGridAndLight(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -261,8 +334,9 @@ void selectGridAndLight(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         UniformGrid chosenGrid = {};
         float chosenGridPdf = 0.0f;
-        selectGridByBRDF(sd, sg, chosenGrid, chosenGridPdf);
+        // selectGridByBRDF(sd, sg, chosenGrid, chosenGridPdf);
         // selectGridByTree(sd, sg, chosenGrid, chosenGridPdf);
+        selectGridByLightcuts(sd, sg, chosenGrid, chosenGridPdf);
 
         // choose light
         uint emissiveIdx; // TODO: rename this to leadNodeIdx
