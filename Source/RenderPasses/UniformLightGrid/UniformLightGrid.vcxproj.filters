@@ -14,5 +14,9 @@
     <ShaderSource Include="ULGTracerHelpers.slang" />
     <ShaderSource Include="ConstructBVH.cs.slang" />
     <ShaderSource Include="GenBVHLeafNodes.cs.slang" />
+    <ShaderSource Include="GridData.slangh" />
+    <ShaderSource Include="SelectGridAndLight.cs.slang" />
+    <ShaderSource Include="TraverseBVH.slang" />
+    <ShaderSource Include="ULGStaticParams.slang" />
   </ItemGroup>
 </Project>

@@ -1,8 +1,11 @@
 #include "BVHNodeData.slangh"
 #include "GridData.slangh"
+import Scene.ShadingData;
+import Experimental.Scene.Material.MaterialShading;
 import Utils.Math.AABB;
 import Utils.Math.BitTricks;
 import Utils.Sampling.SampleGenerator; // TODO: remove this import
+import ULGStaticParams; // TODO: remove this import
 
 StructuredBuffer<LeafNode> gLeafNodes;
 StructuredBuffer<InternalNode> gInternalNodes;
@@ -149,8 +152,10 @@ UniformGrid traverseTreeForGird(uint mortonCode)
     return grid;
 }
 
-UniformGrid traverseTreeForGird<S : ISampleGenerator>(float3 dir, float3 pos, out float pdf, inout S sg)
+UniformGrid traverseTreeForGird<S : ISampleGenerator>(const ShadingData sd, float3 dir, out float pdf, inout S sg)
 {
+    float3 pos = sd.posW;
+
     UniformGrid grid = {};
     uint currNodeId = 0;
     InternalNode currNode = gInternalNodes[currNodeId];
@@ -165,59 +170,85 @@ UniformGrid traverseTreeForGird<S : ISampleGenerator>(float3 dir, float3 pos, ou
             break;
         }
 
+        // TODO: add struct for childs
+        // TODO: add function for childs
         uint lChild = currNode.lChildId;
         bool isLChildLeaf = currNode.isLChildLeaf;
-        float lChildIntensity = 0;
+        float3 lChildIntensity = 0;
         float lChildDis = 0;
         float3 lChildPos = float3(0, 0, 0);
         float3 lChildDir = float3(0, 0, 0);
         if (isLChildLeaf)
         {
-            lChildIntensity = length(gLeafNodes[lChild].intensity);
+            lChildIntensity = gLeafNodes[lChild].intensity;
             lChildPos = computePosByMortonCode(gLeafNodes[lChild].mortonCode, gridMortonCodePrefixLength);
+            // lChildPos = computePosByMortonCode(gLeafNodes[lChild].mortonCode);
             lChildDir = normalize(lChildPos - pos);
             lChildDis = length(lChildPos - pos);
         }
         else
         {
-            lChildIntensity = length(gInternalNodes[lChild].intensity);
+            lChildIntensity = gInternalNodes[lChild].intensity;
             lChildPos = computePosByMortonCode(gInternalNodes[lChild].splitMortonCode, gInternalNodes[lChild].commonPrefixLength);
+            // lChildPos = computePosByMortonCode(gInternalNodes[lChild].splitMortonCode);
             lChildDir = normalize(lChildPos - pos);
             lChildDis = length(lChildPos - pos);
         }
 
         uint rChild = currNode.rChildId;
         bool isRChildLeaf = currNode.isRChildLeaf;
-        float rChildIntensity = 0;
+        float3 rChildIntensity = 0;
         float rChildDis = 0;
         float3 rChildPos = float3(0, 0, 0);
         float3 rChildDir = float3(0, 0, 0);
         if (isRChildLeaf)
         {
-            rChildIntensity = length(gLeafNodes[rChild].intensity);
+            rChildIntensity = gLeafNodes[rChild].intensity;
             rChildPos = computePosByMortonCode(gLeafNodes[rChild].mortonCode, gridMortonCodePrefixLength);
+            // rChildPos = computePosByMortonCode(gLeafNodes[rChild].mortonCode);
             rChildDir = normalize(lChildPos - pos);
             rChildDis = length(lChildPos - pos);
         }
         else
         {
-            rChildIntensity = length(gInternalNodes[rChild].intensity);
+            rChildIntensity = gInternalNodes[rChild].intensity;
             rChildPos = computePosByMortonCode(gInternalNodes[rChild].splitMortonCode, gInternalNodes[rChild].commonPrefixLength);
+            // rChildPos = computePosByMortonCode(gInternalNodes[rChild].splitMortonCode);
             rChildDir = normalize(rChildPos - pos);
             rChildDis = length(lChildPos - pos);
         }
         // choose one child
         bool isLeaf = false;
-        //if (mortonCode <= currNode.splitMortonCode)
-        // dir intensity distance
-        // float pL = lChildIntensity * clamp(dot(dir, lChildDir), 0.0f, 1.f) / lChildDis / lChildDis;
-        // float pR = rChildIntensity * clamp(dot(dir, rChildDir), 0.0f, 1.f) / rChildDis / rChildDis;
-        // dir
-        // float pL = clamp(dot(dir, lChildDir), 0.0f, 1.f);
-        // float pR = clamp(dot(dir, rChildDir), 0.0f, 1.f);
-        // intensity distance
-        float pL = lChildIntensity / lChildDis / lChildDis;
-        float pR = rChildIntensity / rChildDis / rChildDis;
+        float pL, pR;
+        // TODO: make a function for weigh type select
+        if (kTreeTraverseWeightType == (uint)TreeTraverseWeightType::Direction)
+        {
+            pL = clamp(dot(dir, lChildDir), 0.0f, 1.f);
+            pR = clamp(dot(dir, rChildDir), 0.0f, 1.f);
+        }
+        else if (kTreeTraverseWeightType == (uint)TreeTraverseWeightType::DistanceIntensity)
+        {
+            pL = length(lChildIntensity) / lChildDis / lChildDis;
+            pR = length(rChildIntensity) / rChildDis / rChildDis;
+        }
+        else if (kTreeTraverseWeightType == (uint)TreeTraverseWeightType::DirectionDistanceIntensity)
+        {
+            pL = length(lChildIntensity) * clamp(dot(dir, lChildDir), 0.0f, 1.f) / lChildDis / lChildDis;
+            pR = length(rChildIntensity) * clamp(dot(dir, rChildDir), 0.0f, 1.f) / rChildDis / rChildDis;
+            // pL = length(lChildIntensity) * clamp(dot(sd.N, lChildDir), 0.0f, 1.f) / lChildDis / lChildDis;
+            // pR = length(rChildIntensity) * clamp(dot(sd.N, rChildDir), 0.0f, 1.f) / rChildDis / rChildDis;
+        }
+        else if (kTreeTraverseWeightType == (uint)TreeTraverseWeightType::BRDFShading)
+        {
+            // pL = length(evalBSDFCosine(sd, lChildDir) * lChildIntensity) / lChildDis / lChildDis;
+            // pR = length(evalBSDFCosine(sd, rChildDir) * rChildIntensity) / rChildDis / rChildDis;
+            pL = length(lChildIntensity) * dot(sd.N, lChildDir);
+            pR = length(rChildIntensity) * dot(sd.N, rChildDir);
+        }
+        else
+        {
+            pL = pR = 0.5f;
+        }
         float p = max(pL + pR, 0.00001f);
         if (sampleNext1D(sg) < pL / p)
         //if (pL > pR)
@@ -249,55 +280,6 @@ UniformGrid traverseTreeForGird<S : ISampleGenerator>(float3 dir, float3 pos, ou
 
     return grid;
 }
-
-// /** Choose a nearest grid from BVH
-//     \param[in] morton code of current grid
-//     \return nearest grid
-// */
-// UniformGrid traverseTreeForGird(uint mortonCode)
-// {
-//     UniformGrid grid = {};
-//     uint currNodeId = 0;
-//     InternalNode currNode = gInternalNodes[currNodeId];
-//     while (true)
-//     {
-//         // stop if current node size > grid size
-//         // we have 32-bit integer and 30-bit morton code
-//         if (currNode.commonPrefixLength >= gridMortonCodePrefixLength + 2)
-//         {
-//             buildGridByInternalNode(currNodeId, grid);
-//             break;
-//         }
-
-//         // choose one child
-//         bool isLeaf = false;
-//         if (mortonCode <= currNode.splitMortonCode)
-//         {
-//             // Left child
-//             currNodeId = currNode.lChildId;
-//             isLeaf = currNode.isLChildLeaf;
-//         }
-//         else
-//         {
-//             // Right child
-//             currNodeId = currNode.rChildId;
-//             isLeaf = currNode.isRChildLeaf;
-//         }
-
-//         // stop if child is leaf
-//         if (isLeaf)
-//         {
-//             buildGridByLeafNode(currNodeId, grid);
-//             break;
-//         }
-//         else
-//         {
-//             currNode = gInternalNodes[currNodeId];
-//         }
-//     }
-
-//     return grid;
-// }
 
 /** Choose a light from BVH
     \param[in] staring node for traversal

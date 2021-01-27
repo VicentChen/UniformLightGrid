@@ -29,6 +29,7 @@
 #include "Falcor.h"
 #include "RenderPasses/Shared/PathTracer/PathTracer.h"
 #include "Utils/Algorithm/BitonicSort.h"
+#include "ULGStaticParams.slang"
 
 using namespace Falcor;
 
@@ -72,6 +73,7 @@ private:
     void setTracerData(const RenderData& renderData);
 
     void setULGTracerStaticParams(Program* pProgram) const;
+    void addGridAndLightSelectorStaticParams(Program::DefineList& list) const;
 
     struct
     {
@@ -98,9 +100,14 @@ private:
     ComputePass::SharedPtr mpBVHConstructor;
 
     // grid and light selection data
-    uint mGridMortonCodePrefixLength = 27;
-    float mMinDistanceOfGirdSelection = 0.1f;
-    uint mSamplesPerDirection = 8;
+    struct
+    {
+        uint gridMortonCodePrefixLength = 27;
+        float minDistanceOfGirdSelection = 0.1f;
+        uint samplesPerDirection = 8;
+        uint treeTraverseWeightType = (uint)(TreeTraverseWeightType::DistanceIntensity);
+    } mGridAndLightSelectorParams;
+
     ComputePass::SharedPtr mpGridAndLightSelector;
 
     // TODO: add a struct for ULG parameters

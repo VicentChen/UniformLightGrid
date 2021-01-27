@@ -177,7 +177,7 @@ void selectGridByLightcuts<S : ISampleGenerator>(const ShadingData sd, inout S s
     {
         // choose grid
         float gridPdf = 1.f;
-        UniformGrid grid = traverseTreeForGird(dir, pos, gridPdf, sg);
+        UniformGrid grid = traverseTreeForGird(sd, dir, gridPdf, sg);
         gridPdf *= dirPdf;
 
         // recompute BSDF & distance
@@ -199,96 +199,6 @@ void selectGridByLightcuts<S : ISampleGenerator>(const ShadingData sd, inout S s
     float chosenGridWeight = length(chosenGridBSDF * chosenGrid.intensity) / max((chosenGridDistance * chosenGridDistance), 0.0001f);
     chosenGridPdf = chosenGridWeight * samplesPerDirection / max(weightSum, 0.0001f);
         // ------------------------ BUG ------------------------ //
-}
-
-
-void selectGridByTree<S : ISampleGenerator>(const ShadingData sd, inout S sg, out UniformGrid chosenGrid, out float chosenGridPdf)
-{
-    chosenGrid = {};
-    chosenGridPdf = 1.0f;
-
-    UniformGrid grid = {};
-    float r = sampleNext1D(sg);
-    float3 pos = sd.posW;
-
-    uint currNodeId = 0;
-    InternalNode currNode = gInternalNodes[currNodeId];
-    while (true)
-    {
-        // stop if current node size > grid size
-        // we have 32-bit integer and 30-bit morton code
-        if (currNode.commonPrefixLength > gridMortonCodePrefixLength + 2)
-        {
-            buildGridByInternalNode(currNodeId, grid);
-            break;
-        }
-
-        // prepare l child
-        uint lChild = currNode.lChildId;
-        bool isLChildLeaf = currNode.isLChildLeaf;
-        float3 lIntensity = 0.0f;
-        float3 lChildPos = 0;
-        if (isLChildLeaf)
-        {
-            lIntensity = gLeafNodes[lChild].intensity;
-            lChildPos = computePosByMortonCode(gLeafNodes[lChild].mortonCode);
-        }
-        else
-        {
-            lIntensity = gInternalNodes[lChild].intensity;
-            lChildPos = computePosByMortonCode(gInternalNodes[lChild].splitMortonCode, gInternalNodes[lChild].commonPrefixLength);
-        }
-        float lChildWeight = length(evalBSDFCosine(sd, normalize(lChildPos - pos)) * lIntensity / (distance(lChildPos, pos) * distance(lChildPos, pos)));
-
-        // prepare r child
-        uint rChild = currNode.rChildId;
-        bool isRChildLeaf = currNode.isRChildLeaf;
-        float3 rIntensity = 0;
-        float3 rChildPos = 0;
-        if (isRChildLeaf)
-        {
-            rIntensity = gLeafNodes[rChild].intensity;
-            rChildPos = computePosByMortonCode(gLeafNodes[rChild].mortonCode);
-        }
-        else
-        {
-            rIntensity = gInternalNodes[rChild].intensity;
-            rChildPos = computePosByMortonCode(gInternalNodes[rChild].splitMortonCode, gInternalNodes[rChild].commonPrefixLength);
-        }
-        float rChildWeight = length(evalBSDFCosine(sd, normalize(rChildPos - pos)) * rIntensity / (distance(rChildPos, pos) * distance(rChildPos, pos)));
-
-        // choose one child
-        bool isLeaf = false;
-
-        if (r * (lChildWeight + rChildWeight) < lChildWeight)
-        {
-            // Left child
-            currNodeId = lChild;
-            isLeaf = isLChildLeaf;
-            r = r / lChildWeight;
-            chosenGridPdf *= lChildWeight / (lChildWeight + rChildWeight);
-        }
-        else
-        {
-            // Right child
-            currNodeId = rChild;
-            isLeaf = isRChildLeaf;
-            r = (r - lChildWeight) / rChildWeight * (lChildWeight + rChildWeight);
-            chosenGridPdf *= rChildWeight / (lChildWeight + rChildWeight);
-        }
-
-        // stop if child is leaf
-        if (isLeaf)
-        {
-            buildGridByLeafNode(currNodeId, grid);
-            break;
-        }
-        else
-        {
-            currNode = gInternalNodes[currNodeId];
-        }
-    }
-    chosenGrid = grid;
 }
 
 void chooseTriangle<S : ISampleGenerator>(in uint2 range, float3 dir, float3 pos, out uint triangleIdx, out float pdf, inout S sg)
@@ -335,7 +245,6 @@ void selectGridAndLight(uint3 dispatchThreadId : SV_DispatchThreadID)
         UniformGrid chosenGrid = {};
         float chosenGridPdf = 0.0f;
         // selectGridByBRDF(sd, sg, chosenGrid, chosenGridPdf);
-        // selectGridByTree(sd, sg, chosenGrid, chosenGridPdf);
         selectGridByLightcuts(sd, sg, chosenGrid, chosenGridPdf);
 
         // choose light
@@ -350,3 +259,97 @@ void selectGridAndLight(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     gLightIndex[launchIndex] = result;
 }
+
+// void selectGridByTree<S : ISampleGenerator>(const ShadingData sd, inout S sg, out UniformGrid chosenGrid, out float chosenGridPdf)
+// {
+//     chosenGrid = {};
+//     chosenGridPdf = 1.0f;
+
+//     UniformGrid grid = {};
+//     // float r = sampleNext1D(sg);
+//     float3 pos = sd.posW;
+
+//     uint currNodeId = 0;
+//     InternalNode currNode = gInternalNodes[currNodeId];
+//     while (true)
+//     {
+//         // stop if current node size > grid size
+//         // we have 32-bit integer and 30-bit morton code
+//         if (currNode.commonPrefixLength > gridMortonCodePrefixLength + 2)
+//         {
+//             buildGridByInternalNode(currNodeId, grid);
+//             break;
+//         }
+
+//         // prepare l child
+//         uint lChild = currNode.lChildId;
+//         bool isLChildLeaf = currNode.isLChildLeaf;
+//         float3 lIntensity = 0.0f;
+//         float3 lChildPos = 0;
+//         if (isLChildLeaf)
+//         {
+//             lIntensity = gLeafNodes[lChild].intensity;
+//             lChildPos = computePosByMortonCode(gLeafNodes[lChild].mortonCode, gridMortonCodePrefixLength);
+//         }
+//         else
+//         {
+//             lIntensity = gInternalNodes[lChild].intensity;
+//             lChildPos = computePosByMortonCode(gInternalNodes[lChild].splitMortonCode, gInternalNodes[lChild].commonPrefixLength);
+//         }
+//         float lChildWeight = length(evalBSDFCosine(sd, normalize(lChildPos - pos)) * lIntensity / (distance(lChildPos, pos) * distance(lChildPos, pos)));
+//         // float lChildWeight = length(lIntensity / (distance(lChildPos, pos) * distance(lChildPos, pos)));
+
+//         // prepare r child
+//         uint rChild = currNode.rChildId;
+//         bool isRChildLeaf = currNode.isRChildLeaf;
+//         float3 rIntensity = 0;
+//         float3 rChildPos = 0;
+//         if (isRChildLeaf)
+//         {
+//             rIntensity = gLeafNodes[rChild].intensity;
+//             rChildPos = computePosByMortonCode(gLeafNodes[rChild].mortonCode, gridMortonCodePrefixLength);
+//         }
+//         else
+//         {
+//             rIntensity = gInternalNodes[rChild].intensity;
+//             rChildPos = computePosByMortonCode(gInternalNodes[rChild].splitMortonCode, gInternalNodes[rChild].commonPrefixLength);
+//         }
+//         float rChildWeight = length(evalBSDFCosine(sd, normalize(rChildPos - pos)) * rIntensity / (distance(rChildPos, pos) * distance(rChildPos, pos)));
+//         // float rChildWeight = length(rIntensity / (distance(rChildPos, pos) * distance(rChildPos, pos)));
+
+//         // choose one child
+//         bool isLeaf = false;
+
+//         float weight = max(lChildWeight + rChildWeight, 0.00001f);
+//         if (sampleNext1D(sg) < lChildWeight / weight)
+//         {
+//             // Left child
+//             currNodeId = lChild;
+//             isLeaf = isLChildLeaf;
+//             // r = r / lChildWeight;
+//             // chosenGridPdf *= lChildWeight / (lChildWeight + rChildWeight);
+//             chosenGridPdf *= lChildWeight / weight;
+//         }
+//         else
+//         {
+//             // Right child
+//             currNodeId = rChild;
+//             isLeaf = isRChildLeaf;
+//             // r = (r - lChildWeight) / rChildWeight * (lChildWeight + rChildWeight);
+//             // chosenGridPdf *= rChildWeight / (lChildWeight + rChildWeight);
+//             chosenGridPdf *= rChildWeight / weight;
+//         }
+
+//         // stop if child is leaf
+//         if (isLeaf)
+//         {
+//             buildGridByLeafNode(currNodeId, grid);
+//             break;
+//         }
+//         else
+//         {
+//             currNode = gInternalNodes[currNodeId];
+//         }
+//     }
+//     chosenGrid = grid;
+// }

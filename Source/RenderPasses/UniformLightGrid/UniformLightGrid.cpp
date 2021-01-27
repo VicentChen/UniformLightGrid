@@ -109,7 +109,6 @@ UniformLightGrid::UniformLightGrid(const Dictionary& dict)
 
 AABB UniformLightGrid::sceneBoundHelper()
 {
-    // TODO: add way to get real scene bound
     const auto& sceneBound = mpScene->getSceneBounds();
     AABB hackedSceneBound = sceneBound;
     auto extent = hackedSceneBound.extent();
@@ -212,8 +211,9 @@ void UniformLightGrid::chooseGridsAndLights(RenderContext* pRenderContext, const
         gridAndLightSelectorDefines.add("CHUNK_SIZE", std::to_string(kChunkSize));
         gridAndLightSelectorDefines.add(getValidResourceDefines(mInputChannels, renderData)); // We need `loadShadingData`, which uses input channels
         gridAndLightSelectorDefines.add(mpSampleGenerator->getDefines()); // We need `SampleGenerator`
+        addGridAndLightSelectorStaticParams(gridAndLightSelectorDefines);
         mpGridAndLightSelector = ComputePass::create(kGridAndLightSelectorFile, "selectGridAndLight", gridAndLightSelectorDefines);
-        setStaticParams(mpGridAndLightSelector->getProgram().get()); // TODO: reduce defines
+        setStaticParams(mpGridAndLightSelector->getProgram().get()); // BUG: defines will not be added after compute program created
     }
 
     Texture::SharedPtr pLightIndexTexture = renderData[kLightIndexInternal]->asTexture();
@@ -244,12 +244,12 @@ void UniformLightGrid::chooseGridsAndLights(RenderContext* pRenderContext, const
     auto var = mpGridAndLightSelector.getRootVar()["PerFrameCB"];
     var["dispatchDim"] = mSharedParams.frameDim;
     var["frameCount"] = mSharedParams.frameCount;
-    var["minDistance"] = mMinDistanceOfGirdSelection;
-    var["samplesPerDirection"] = mSamplesPerDirection;
+    var["minDistance"] = mGridAndLightSelectorParams.minDistanceOfGirdSelection;
+    var["samplesPerDirection"] = mGridAndLightSelectorParams.samplesPerDirection;
     // TODO: function to bind AABB
     var["realSceneBound"]["minPoint"] = realSceneBound.minPoint;
     var["realSceneBound"]["maxPoint"] = realSceneBound.maxPoint;
-    mpGridAndLightSelector.getRootVar()["PerFrameBVHCB"]["gridMortonCodePrefixLength"] = mGridMortonCodePrefixLength;
+    mpGridAndLightSelector.getRootVar()["PerFrameBVHCB"]["gridMortonCodePrefixLength"] = mGridAndLightSelectorParams.gridMortonCodePrefixLength;
     mpGridAndLightSelector.getRootVar()["PerFrameBVHCB"]["quantLevels"] = kQuantLevels;
     mpGridAndLightSelector.getRootVar()["PerFrameBVHCB"]["sceneBound"]["minPoint"] = sceneBound.minPoint;
     mpGridAndLightSelector.getRootVar()["PerFrameBVHCB"]["sceneBound"]["maxPoint"] = sceneBound.maxPoint;
@@ -354,12 +354,26 @@ void UniformLightGrid::execute(RenderContext* pRenderContext, const RenderData& 
 
 void UniformLightGrid::renderUI(Gui::Widgets& widget)
 {
-    // TODO: render mTracerParams
-    widget.text("");
-    widget.var("grid morton code prefix length", mGridMortonCodePrefixLength, 3u, 27u, 3u);
     widget.var("output color amplifer", mAmplifyCofficient, 1.0f, 100.0f, 1.0f);
-    widget.var("min distance of grid selection", mMinDistanceOfGirdSelection, 0.1f, 100.0f, 0.1f);
-    widget.var("grid samples per direction", mSamplesPerDirection, 1u, 64u, 1u);
+
+    {
+        bool regenerateSelector = false;
+        widget.text("Grid & Light Selector Params");
+        widget.var("grid morton code prefix length", mGridAndLightSelectorParams.gridMortonCodePrefixLength, 3u, 27u, 3u);
+        widget.var("min distance of grid selection", mGridAndLightSelectorParams.minDistanceOfGirdSelection, 0.1f, 100.0f, 0.1f);
+        widget.var("grid samples per direction", mGridAndLightSelectorParams.samplesPerDirection, 1u, 64u, 1u);
+        { // Tree traverse weight gui component
+            Gui::DropdownList list;
+            list.push_back({ (uint)TreeTraverseWeightType::Direction, "Direction" });
+            list.push_back({ (uint)TreeTraverseWeightType::DistanceIntensity, "DistanceIntensity" });
+            list.push_back({ (uint)TreeTraverseWeightType::DirectionDistanceIntensity, "DirectionDistanceIntensity" });
+            list.push_back({ (uint)TreeTraverseWeightType::BRDFShading, "BRDFShading" });
+            if (widget.dropdown("Tree traverse weight type", list, mGridAndLightSelectorParams.treeTraverseWeightType))
+                regenerateSelector = true;
+        }
+        if (regenerateSelector) mpGridAndLightSelector = nullptr;
+    }
+
     widget.text("ULG Tracer Params");
     widget.checkbox("shadow ray always visible?", mULGTracerParams.shadowRayAlwaysVisible);
     widget.checkbox("use ground truth shadow ray?", mULGTracerParams.useGroundTruthShadowRay);
@@ -424,4 +438,10 @@ void UniformLightGrid::setULGTracerStaticParams(Program* pProgram) const
     pProgram->addDefine("SHADOW_RAY_ALWAYS_VISIBLE", mULGTracerParams.shadowRayAlwaysVisible ? "1" : "0");
     pProgram->addDefine("USE_GROUND_TRUTH_SHADOW_RAY", mULGTracerParams.useGroundTruthShadowRay ? "1" : "0");
     pProgram->addDefine("USE_REFLECTION", mULGTracerParams.useReflection ? "1" : "0");
+}
+
+void UniformLightGrid::addGridAndLightSelectorStaticParams(Program::DefineList& list) const
+{
+    list.add("ULG_GRID_AND_LIGHT_SELECTOR_PARAM", "1");
+    list.add("TREE_TRAVERSE_WEIGHT_TYPE", std::to_string(mGridAndLightSelectorParams.treeTraverseWeightType));
 }
