@@ -297,7 +297,6 @@ void evalDirect(const PathTracerData pt, ShadingData sd, inout PathData path)
     for (uint i = 0; i < kLightSamplesPerVertex; ++i)
     {
         ShadowRay shadowRay = {};
-        // TODO: add switch for different shadow ray generators
         bool valid = false;
         if (kUseGroundTruthShadowRay)
             valid = generateShadowRay(pt.params, pt.envMapSampler, pt.emissiveSampler, sd, i, path, path.sg, shadowRay);

@@ -116,6 +116,7 @@ private:
         float minDistanceOfGirdSelection = 0.1f;
         uint samplesPerDirection = 8;
         uint treeTraverseWeightType = (uint)(TreeTraverseWeightType::DistanceIntensity);
+        uint gridSelectionStrategy = (uint)(GridSelectionStrategy::Resampling);
     } mGridAndLightSelectorParams;
 
     ComputePass::SharedPtr mpGridAndLightSelector;

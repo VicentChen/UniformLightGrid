@@ -285,6 +285,6 @@ UniformGrid traverseTreeForGird<S : ISampleGenerator>(const ShadingData sd, floa
 */
 uint traverseTreeForLight(uint root)
 {
-    // TODO:
+    // TODO: we implemented it in SelectGridAndLight.cs.slang > chooseTriangle
     return 0;
 }

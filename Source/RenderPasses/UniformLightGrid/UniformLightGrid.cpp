@@ -420,7 +420,19 @@ void UniformLightGrid::renderUI(Gui::Widgets& widget)
         widget.var("grid morton code prefix length", mGridAndLightSelectorParams.gridMortonCodePrefixLength, 3u, 27u, 3u);
         widget.var("min distance of grid selection", mGridAndLightSelectorParams.minDistanceOfGirdSelection, 0.1f, 100.0f, 0.1f);
         widget.var("grid samples per direction", mGridAndLightSelectorParams.samplesPerDirection, 1u, 64u, 1u);
-        { // Tree traverse weight gui component
+
+        { // Grid selection strategy gui component
+            Gui::DropdownList list;
+            list.push_back({ (uint)GridSelectionStrategy::MortonCodeAndBRDF, "MortonCodeAndBRDF" });
+            list.push_back({ (uint)GridSelectionStrategy::TreeTraversal, "TreeTraversal" });
+            list.push_back({ (uint)GridSelectionStrategy::Resampling, "Resampling" });
+            if (widget.dropdown("Grid selection strategy", list, mGridAndLightSelectorParams.gridSelectionStrategy))
+                regenerateSelector = true;
+        }
+
+        // Tree traverse weight gui component
+        if (mGridAndLightSelectorParams.gridSelectionStrategy == (uint)GridSelectionStrategy::TreeTraversal)
+        {
             Gui::DropdownList list;
             list.push_back({ (uint)TreeTraverseWeightType::Direction, "Direction" });
             list.push_back({ (uint)TreeTraverseWeightType::DistanceIntensity, "DistanceIntensity" });
@@ -429,6 +441,8 @@ void UniformLightGrid::renderUI(Gui::Widgets& widget)
             if (widget.dropdown("Tree traverse weight type", list, mGridAndLightSelectorParams.treeTraverseWeightType))
                 regenerateSelector = true;
         }
+
+        // we can't add define for compute pass, so we regenerate it every time defines change
         if (regenerateSelector) mpGridAndLightSelector = nullptr;
     }
 
@@ -502,4 +516,5 @@ void UniformLightGrid::addGridAndLightSelectorStaticParams(Program::DefineList& 
 {
     list.add("ULG_GRID_AND_LIGHT_SELECTOR_PARAM", "1");
     list.add("TREE_TRAVERSE_WEIGHT_TYPE", std::to_string(mGridAndLightSelectorParams.treeTraverseWeightType));
+    list.add("GRID_SELECTION_STRATEGY", std::to_string(mGridAndLightSelectorParams.gridSelectionStrategy));
 }

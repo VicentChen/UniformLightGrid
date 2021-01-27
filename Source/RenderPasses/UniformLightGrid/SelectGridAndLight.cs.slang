@@ -5,6 +5,7 @@ import Utils.Math.AABB;
 import Utils.Math.BitTricks;
 import Utils.Sampling.SampleGenerator;
 import TraverseBVH;
+import ULGStaticParams;
 
 #ifndef CHUNK_SIZE
     // Compile-time error if GROUP_SIZE is not defined.
@@ -162,7 +163,7 @@ void selectGridByBRDF<S : ISampleGenerator>(const ShadingData sd, inout S sg, ou
         // ------------------------ BUG ------------------------ //
 }
 
-void selectGridByLightcuts<S : ISampleGenerator>(const ShadingData sd, inout S sg, out UniformGrid chosenGrid, out float chosenGridPdf)
+void selectGridByTreeTraversal<S : ISampleGenerator>(const ShadingData sd, inout S sg, out UniformGrid chosenGrid, out float chosenGridPdf)
 {
     float3 pos = sd.posW;
 
@@ -208,7 +209,7 @@ void selectGridByLightcuts<S : ISampleGenerator>(const ShadingData sd, inout S s
         // ------------------------ BUG ------------------------ //
 }
 
-void selectGridByReSTIR<S : ISampleGenerator>(const ShadingData sd, inout S sg, out UniformGrid chosenGrid, out float chosenGridPdf)
+void selectGridByResampling<S : ISampleGenerator>(const ShadingData sd, inout S sg, out UniformGrid chosenGrid, out float chosenGridPdf)
 {
     float3 pos = sd.posW;
     float gridPdf = 1.f / gridCount;
@@ -238,6 +239,7 @@ void selectGridByReSTIR<S : ISampleGenerator>(const ShadingData sd, inout S sg, 
     chosenGridPdf = chosenGridWeight * samplesPerDirection / max(weightSum, 0.0001f);
 }
 
+// TODO: check this when use
 void chooseTriangle<S : ISampleGenerator>(in uint2 range, float3 dir, float3 pos, out uint triangleIdx, out float pdf, inout S sg)
 {
     float weightSum = 0;
@@ -245,7 +247,7 @@ void chooseTriangle<S : ISampleGenerator>(in uint2 range, float3 dir, float3 pos
     float choosenPHat = 0;
     pdf = 0;
     triangleIdx = range.x;
-    for (int i = 0; i < 4; i++) //TODO:: make 4 a variable
+    for (int i = 0; i < 4; i++) // TODO:: make 4 a variable
     {
         uint idx = 0;
         float delta = range.y - range.x + 1;
@@ -281,16 +283,22 @@ void selectGridAndLight(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         UniformGrid chosenGrid = {};
         float chosenGridPdf = 0.0f;
-        // TODO: add variable for selection stragety
-        // selectGridByBRDF(sd, sg, chosenGrid, chosenGridPdf);
-        // selectGridByLightcuts(sd, sg, chosenGrid, chosenGridPdf);
-        selectGridByReSTIR(sd, sg, chosenGrid, chosenGridPdf);
+        
+        // TODO: add a function for this?
+        if (kGridSelectionStrategy == (uint)GridSelectionStrategy::MortonCodeAndBRDF)
+            selectGridByBRDF(sd, sg, chosenGrid, chosenGridPdf);
+        else if (kGridSelectionStrategy == (uint)GridSelectionStrategy::TreeTraversal)
+            selectGridByTreeTraversal(sd, sg, chosenGrid, chosenGridPdf);
+        else if (kGridSelectionStrategy == (uint)GridSelectionStrategy::Resampling)
+            selectGridByResampling(sd, sg, chosenGrid, chosenGridPdf);
+        else // Use resampling by default
+            selectGridByResampling(sd, sg, chosenGrid, chosenGridPdf);
 
         // choose light
-        uint emissiveIdx; // TODO: rename this to leadNodeIdx
+        uint leafNodeIdx;
         float idxPdf;
-        sampleRangeUniformly(chosenGrid.range, sg, emissiveIdx, idxPdf);
-        uint emissiveTriangleIndex = gLeafNodes[emissiveIdx].triangleIdx;
+        sampleRangeUniformly(chosenGrid.range, sg, leafNodeIdx, idxPdf);
+        uint emissiveTriangleIndex = gLeafNodes[leafNodeIdx].triangleIdx;
         float emissivePdf = chosenGridPdf * idxPdf;
 
         result = float4(emissiveTriangleIndex, emissivePdf, idxPdf, 1);
