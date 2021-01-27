@@ -1,3 +1,5 @@
+#pragma once
+
 enum class TreeTraverseWeightType
 {
     Direction                   = 1,

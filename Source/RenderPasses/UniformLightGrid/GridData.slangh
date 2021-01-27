@@ -1,6 +1,8 @@
 #pragma once
 #include "Utils/HostDeviceShared.slangh"
 
+BEGIN_NAMESPACE_FALCOR
+
 struct UniformGrid
 {
     float3 pos = float3(0, 0, 0);
@@ -10,3 +12,5 @@ struct UniformGrid
     uint rootNode = 0; // TODO: rename
     bool isLeafNode = false;
 };
+
+END_NAMESPACE_FALCOR

@@ -1,7 +1,9 @@
 #pragma once
 #include "Utils/HostDeviceShared.slangh"
 
-struct InternalNode
+BEGIN_NAMESPACE_FALCOR
+// TODO: merge two node types into BVHNode
+struct BVHInternalNode
 {
     // TODO: bottom level internal node as leaf node
     bool isLChildLeaf = false;
@@ -32,10 +34,12 @@ struct InternalNode
 #endif
 };
 
-struct LeafNode
+struct BVHLeafNode
 {
     uint mortonCode = 0;
     uint triangleIdx = 0;
     float3 intensity = float3(0, 0, 0);
     float4 debug = float4(0, 0, 0, 0);
 };
+
+END_NAMESPACE_FALCOR

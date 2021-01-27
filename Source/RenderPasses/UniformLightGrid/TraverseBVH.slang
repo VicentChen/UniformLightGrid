@@ -7,8 +7,8 @@ import Utils.Math.BitTricks;
 import Utils.Sampling.SampleGenerator; // TODO: remove this import
 import ULGStaticParams; // TODO: remove this import
 
-StructuredBuffer<LeafNode> gLeafNodes;
-StructuredBuffer<InternalNode> gInternalNodes;
+StructuredBuffer<BVHLeafNode> gLeafNodes;
+StructuredBuffer<BVHInternalNode> gInternalNodes;
 
 // TODO: better way to solve cbuffer name conflict
 cbuffer PerFrameBVHCB
@@ -46,7 +46,7 @@ void buildGridByInternalNode(in uint rootNode, out UniformGrid grid)
     grid.rootNode = rootNode;
     grid.isLeafNode = false;
 
-    InternalNode node = gInternalNodes[rootNode];
+    BVHInternalNode node = gInternalNodes[rootNode];
     grid.pos = computePosByMortonCode(node.splitMortonCode, gridMortonCodePrefixLength);
     grid.intensity = node.intensity;
     grid.range = node.range;
@@ -57,7 +57,7 @@ void buildGridByLeafNode(in uint rootNode, out UniformGrid grid)
     grid.rootNode = rootNode;
     grid.isLeafNode = true;
 
-    LeafNode node = gLeafNodes[rootNode];
+    BVHLeafNode node = gLeafNodes[rootNode];
     grid.pos = computePosByMortonCode(node.mortonCode, gridMortonCodePrefixLength);
     grid.intensity = node.intensity;
     grid.range = uint2(rootNode, rootNode);
@@ -71,7 +71,7 @@ UniformGrid traverseTreeForGird(uint mortonCode)
 {
     UniformGrid grid = {};
     uint currNodeId = 0;
-    InternalNode currNode = gInternalNodes[currNodeId];
+    BVHInternalNode currNode = gInternalNodes[currNodeId];
     float3 pos = computePosByMortonCode(mortonCode);
 
     while (true)
@@ -158,7 +158,7 @@ UniformGrid traverseTreeForGird<S : ISampleGenerator>(const ShadingData sd, floa
 
     UniformGrid grid = {};
     uint currNodeId = 0;
-    InternalNode currNode = gInternalNodes[currNodeId];
+    BVHInternalNode currNode = gInternalNodes[currNodeId];
     pdf = 1.f;
     while (true)
     {
@@ -240,10 +240,8 @@ UniformGrid traverseTreeForGird<S : ISampleGenerator>(const ShadingData sd, floa
         }
         else if (kTreeTraverseWeightType == (uint)TreeTraverseWeightType::BRDFShading)
         {
-            // pL = length(evalBSDFCosine(sd, lChildDir) * lChildIntensity) / lChildDis / lChildDis;
-            // pR = length(evalBSDFCosine(sd, rChildDir) * rChildIntensity) / rChildDis / rChildDis;
-            pL = length(lChildIntensity) * dot(sd.N, lChildDir);
-            pR = length(rChildIntensity) * dot(sd.N, rChildDir);
+            pL = length(evalBSDFCosine(sd, lChildDir) * lChildIntensity) / lChildDis / lChildDis;
+            pR = length(evalBSDFCosine(sd, rChildDir) * rChildIntensity) / rChildDis / rChildDis;
         }
         else
         {

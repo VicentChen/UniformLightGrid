@@ -29,6 +29,8 @@
 #include "Falcor.h"
 #include "RenderPasses/Shared/PathTracer/PathTracer.h"
 #include "Utils/Algorithm/BitonicSort.h"
+#include "BVHNodeData.slangh"
+#include "GridData.slangh"
 #include "ULGStaticParams.slang"
 
 using namespace Falcor;
@@ -66,6 +68,8 @@ private:
     void sortLeafNodes(RenderContext* pRenderContext);
     void constructBVHTree(RenderContext* pRenderContext);
 
+    void generateUniformGrids();
+
     void chooseGridsAndLights(RenderContext* pRenderContext, const RenderData& renderData);
 
     void recreateVars() override { mULGTracer.pVars = nullptr; }
@@ -91,6 +95,7 @@ private:
     } mULGTracer;
 
     // leaf node data
+    std::vector<BVHLeafNode> mLeafNodes;
     Buffer::SharedPtr mpBVHLeafNodesBuffer;
     Buffer::SharedPtr mpBVHLeafNodesHelperBuffer;
     ComputePass::SharedPtr mpLeafNodeGenerator;
@@ -98,6 +103,11 @@ private:
     // internal node data
     Buffer::SharedPtr mpBVHInternalNodesBuffer;
     ComputePass::SharedPtr mpBVHConstructor;
+
+    // uniform grid data
+    std::vector<UniformGrid> mGrids;
+    Buffer::SharedPtr mpGridDataBuffer;
+    Buffer::SharedPtr mpGridDataHelperBuffer;
 
     // grid and light selection data
     struct

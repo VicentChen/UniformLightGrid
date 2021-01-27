@@ -29,6 +29,7 @@
 #include "RenderGraph/RenderPassHelpers.h"
 #include "Scene/HitInfo.h"
 #include "BVHNodeData.slangh"
+#include "UniformLightGridCommon.h"
 #include <sstream>
 
 namespace
@@ -142,7 +143,6 @@ void UniformLightGrid::generateBVHLeafNodes(RenderContext* pRenderContext)
     }
 
     // TODO: do we have better way to get scene bound?
-    //const auto& sceneBound = mpScene->getSceneBounds();
     auto sceneBound = sceneBoundHelper();
 
     mpLeafNodeGenerator.getRootVar()["gScene"] = mpScene->getParameterBlock();
@@ -161,17 +161,18 @@ void UniformLightGrid::sortLeafNodes(RenderContext* pRenderContext)
     PROFILE("ULG_BitonicSortLeafNodes");
     // TODO: move to gpu
     uint32_t emissiveTriangleCount = mpScene->getLightCollection(pRenderContext)->getTotalLightCount();
-    size_t bufferSize = sizeof(::LeafNode) * emissiveTriangleCount;
+    size_t bufferSize = sizeof(BVHLeafNode) * emissiveTriangleCount;
 
-    std::vector<::LeafNode> leaves(emissiveTriangleCount);
-    ::LeafNode* pLeaves = (::LeafNode*)mpBVHLeafNodesBuffer->map(Buffer::MapType::Read);
-    memcpy(leaves.data(), pLeaves, bufferSize);
+    if (mLeafNodes.size() < emissiveTriangleCount)
+        mLeafNodes.resize(emissiveTriangleCount);
+    BVHLeafNode* pLeaves = (BVHLeafNode*)mpBVHLeafNodesBuffer->map(Buffer::MapType::Read);
+    memcpy(mLeafNodes.data(), pLeaves, bufferSize);
     mpBVHLeafNodesBuffer->unmap();
 
-    std::sort(leaves.begin(), leaves.end(), [](const ::LeafNode& a, const ::LeafNode& b) { return a.mortonCode < b.mortonCode; });
+    std::sort(mLeafNodes.begin(), mLeafNodes.end(), [](const BVHLeafNode& a, const BVHLeafNode& b) { return a.mortonCode < b.mortonCode; });
 
-    pLeaves = (::LeafNode*)mpBVHLeafNodesHelperBuffer->map(Buffer::MapType::Write);
-    memcpy(pLeaves, leaves.data(), bufferSize);
+    pLeaves = (BVHLeafNode*)mpBVHLeafNodesHelperBuffer->map(Buffer::MapType::Write);
+    memcpy(pLeaves, mLeafNodes.data(), bufferSize);
     mpBVHLeafNodesHelperBuffer->unmap();
 
     pRenderContext->copyBufferRegion(mpBVHLeafNodesBuffer.get(), 0, mpBVHLeafNodesHelperBuffer.get(), 0, bufferSize);
@@ -198,6 +199,39 @@ void UniformLightGrid::constructBVHTree(RenderContext* pRenderContext)
     mpBVHConstructor->execute(pRenderContext, internalNodeCount, 1, 1);
 }
 
+void UniformLightGrid::generateUniformGrids()
+{
+    PROFILE("ULG_generateUniformGrids");
+
+    AABB sceneBound = sceneBoundHelper();
+
+    mGrids.clear();
+    for (size_t i = 0; i < mLeafNodes.size();)
+    {
+        uint mask = ~(0xFFFFFF << (30 - mGridAndLightSelectorParams.gridMortonCodePrefixLength));
+        uint bound = mLeafNodes[i].mortonCode | mask;
+
+        float3 intensity = float3(0, 0, 0);
+
+        size_t beginIdx = i;
+        while (i < mLeafNodes.size() && mLeafNodes[i].mortonCode <= bound)
+        {
+            intensity += mLeafNodes[i].intensity;
+            i++;
+        }
+        size_t endIdx = i - 1;
+
+        UniformGrid grid;
+        grid.pos = computePosByMortonCode(bound, mGridAndLightSelectorParams.gridMortonCodePrefixLength, kQuantLevels, sceneBound);
+        grid.intensity = intensity;
+        grid.range = uint2(beginIdx, endIdx);
+        grid.rootNode = 0;
+        grid.isLeafNode = false;
+
+        mGrids.emplace_back(grid);
+    }
+}
+
 void UniformLightGrid::chooseGridsAndLights(RenderContext* pRenderContext, const RenderData& renderData)
 {
     PROFILE("ULG_chooseGridAndLight");
@@ -214,6 +248,28 @@ void UniformLightGrid::chooseGridsAndLights(RenderContext* pRenderContext, const
         addGridAndLightSelectorStaticParams(gridAndLightSelectorDefines);
         mpGridAndLightSelector = ComputePass::create(kGridAndLightSelectorFile, "selectGridAndLight", gridAndLightSelectorDefines);
         setStaticParams(mpGridAndLightSelector->getProgram().get()); // BUG: defines will not be added after compute program created
+    }
+
+    // prepare grid data
+    generateUniformGrids();
+    if (!mpGridDataBuffer || mpGridDataBuffer->getElementCount() < mGrids.size())
+    {
+        uint32_t gridSize = (uint32_t)mGrids.size();
+        mpGridDataBuffer = Buffer::createStructured(mpGridAndLightSelector->getRootVar()["gGrids"], gridSize, Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false);
+        mpGridDataBuffer->setName("ULG::mpGridDataBuffer");
+
+        mpGridDataHelperBuffer = Buffer::createStructured(mpGridAndLightSelector->getRootVar()["gGrids"], gridSize, Resource::BindFlags::None, Buffer::CpuAccess::Write);
+        mpGridDataHelperBuffer->setName("ULG::mpGridDataBufferHelper");
+    }
+
+    // Copy grid data to gpu
+    {
+        size_t bufferSize = sizeof(UniformGrid) * mGrids.size();
+        UniformGrid* pGrids = (UniformGrid*)mpGridDataHelperBuffer->map(Buffer::MapType::Write);
+        memcpy(pGrids, mGrids.data(), bufferSize);
+        mpGridDataHelperBuffer->unmap();
+
+        pRenderContext->copyBufferRegion(mpGridDataBuffer.get(), 0, mpGridDataHelperBuffer.get(), 0, bufferSize);
     }
 
     Texture::SharedPtr pLightIndexTexture = renderData[kLightIndexInternal]->asTexture();
@@ -240,6 +296,7 @@ void UniformLightGrid::chooseGridsAndLights(RenderContext* pRenderContext, const
     mpGridAndLightSelector.getRootVar()["gScene"] = mpScene->getParameterBlock();
     mpGridAndLightSelector.getRootVar()["gLeafNodes"] = mpBVHLeafNodesBuffer;
     mpGridAndLightSelector.getRootVar()["gInternalNodes"] = mpBVHInternalNodesBuffer;
+    mpGridAndLightSelector.getRootVar()["gGrids"] = mpGridDataBuffer;
 
     auto var = mpGridAndLightSelector.getRootVar()["PerFrameCB"];
     var["dispatchDim"] = mSharedParams.frameDim;
@@ -249,6 +306,7 @@ void UniformLightGrid::chooseGridsAndLights(RenderContext* pRenderContext, const
     // TODO: function to bind AABB
     var["realSceneBound"]["minPoint"] = realSceneBound.minPoint;
     var["realSceneBound"]["maxPoint"] = realSceneBound.maxPoint;
+    var["gridCount"] = mGrids.size();
     mpGridAndLightSelector.getRootVar()["PerFrameBVHCB"]["gridMortonCodePrefixLength"] = mGridAndLightSelectorParams.gridMortonCodePrefixLength;
     mpGridAndLightSelector.getRootVar()["PerFrameBVHCB"]["quantLevels"] = kQuantLevels;
     mpGridAndLightSelector.getRootVar()["PerFrameBVHCB"]["sceneBound"]["minPoint"] = sceneBound.minPoint;

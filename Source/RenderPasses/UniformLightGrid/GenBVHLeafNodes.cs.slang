@@ -16,7 +16,7 @@ cbuffer PerFrameCB
     AABB sceneBound; // reference: LightBVHRefits.cs.slang
 }
 
-RWStructuredBuffer<LeafNode> gLeafNodes;
+RWStructuredBuffer<BVHLeafNode> gLeafNodes;
 
 [numthreads(GROUP_SIZE, 1, 1)]
 void genBVHLeafNodes(uint3 dispatchThreadId : SV_DispatchThreadID)
@@ -37,7 +37,7 @@ void genBVHLeafNodes(uint3 dispatchThreadId : SV_DispatchThreadID)
     uint3 quantPos = min(max(0, uint3(normPos * quantLevels)), quantLevels - 1);
     uint mortonCode = interleave_uint3(quantPos);
 
-    LeafNode node = {};
+    BVHLeafNode node = {};
     node.mortonCode = mortonCode;
     node.triangleIdx = threadId;
     node.intensity = emissive * area;

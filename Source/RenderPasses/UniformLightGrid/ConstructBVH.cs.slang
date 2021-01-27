@@ -10,8 +10,8 @@
     #error GROUP_SIZE is not defined. Add define in cpp file.
 #endif
 
-StructuredBuffer<LeafNode> gLeafNodes;
-RWStructuredBuffer<InternalNode> gInternalNodes;
+StructuredBuffer<BVHLeafNode> gLeafNodes;
+RWStructuredBuffer<BVHInternalNode> gInternalNodes;
 
 cbuffer PerFrameCB
 {
@@ -111,7 +111,7 @@ void constructBVH(uint3 dispatchThreadId : SV_DispatchThreadID)
     // Find out which range of objects the node corresponds to.
     // (This is where the magic happens!)
 
-    InternalNode node = {};
+    BVHInternalNode node = {};
 
     uint2 range = determineRange(idx);
     uint first = range.x;
