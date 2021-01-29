@@ -3,7 +3,7 @@
 
 using namespace Falcor;
 
-uint deinterleave_32bit(uint x)
+inline uint deinterleave_32bit(uint x)
 {
     x &= 0x09249249;                  // x = ---- 9--8 --7- -6-- 5--4 --3- -2-- 1--0
     x = (x ^ (x >> 2)) & 0x030c30c3;  // x = ---- --98 ---- 76-- --54 ---- 32-- --10
@@ -13,7 +13,7 @@ uint deinterleave_32bit(uint x)
     return x;
 }
 
-uint3 deinterleave_uint3(uint x)
+inline uint3 deinterleave_uint3(uint x)
 {
     uint3 v;
     v.z = deinterleave_32bit(x);
@@ -22,7 +22,7 @@ uint3 deinterleave_uint3(uint x)
     return v;
 }
 
-float3 computePosByMortonCode(const uint mortonCode, const uint prefixLength, const float quantLevels, const AABB& sceneBound)
+inline float3 computePosByMortonCode(const uint mortonCode, const uint prefixLength, const float quantLevels, const AABB& sceneBound)
 {
     uint maskMin = 0xFFFFFFFF << (30 - prefixLength);
     uint mortonCodeMin = mortonCode & (maskMin);
@@ -37,3 +37,5 @@ float3 computePosByMortonCode(const uint mortonCode, const uint prefixLength, co
 
     return (minPos + maxPos) * 0.5f;
 }
+
+void createAndCopyBuffer(RenderContext* pRenderContext, Buffer::SharedPtr& pBuffer, Buffer::SharedPtr& pStagingBuffer, uint elementSize, uint elementCount, void* pCpuData, const std::string& bufferName, const std::string& stagingBufferName);

@@ -68,7 +68,8 @@ private:
     void sortLeafNodes(RenderContext* pRenderContext);
     void constructBVHTree(RenderContext* pRenderContext);
 
-    void generateUniformGrids();
+    void generateUniformGrids(RenderContext* pRenderContext);
+    void generateOctree(RenderContext* pRenderContext);
 
     void chooseGridsAndLights(RenderContext* pRenderContext, const RenderData& renderData);
 
@@ -79,6 +80,7 @@ private:
     void setULGTracerStaticParams(Program* pProgram) const;
     void addGridAndLightSelectorStaticParams(Program::DefineList& list) const;
 
+    // Ray tracer parameters
     struct
     {
         bool shadowRayAlwaysVisible = false;
@@ -105,18 +107,23 @@ private:
     ComputePass::SharedPtr mpBVHConstructor;
 
     // uniform grid data
+    std::vector<OctreeNode> mOctreeNodes;
+    Buffer::SharedPtr mpOctreeDataBuffer;
+    Buffer::SharedPtr mpOctreeDataStagingBuffer;
+
     std::vector<UniformGrid> mGrids;
     Buffer::SharedPtr mpGridDataBuffer;
-    Buffer::SharedPtr mpGridDataHelperBuffer;
+    Buffer::SharedPtr mpGridDataStagingBuffer;
 
     // grid and light selection data
     struct
     {
+        bool needToRegenerateSelector = false;
         uint gridMortonCodePrefixLength = 27;
         float minDistanceOfGirdSelection = 0.1f;
         uint samplesPerDirection = 8;
         uint treeTraverseWeightType = (uint)(TreeTraverseWeightType::DistanceIntensity);
-        uint gridSelectionStrategy = (uint)(GridSelectionStrategy::Resampling);
+        uint gridSelectionStrategy = (uint)(GridSelectionStrategy::Octree);
     } mGridAndLightSelectorParams;
 
     ComputePass::SharedPtr mpGridAndLightSelector;

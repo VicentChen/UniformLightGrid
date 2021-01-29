@@ -66,8 +66,10 @@ void buildGridByLeafNode(in uint rootNode, out UniformGrid grid)
 /** Choose a nearest grid from BVH
     \param[in] morton code of current grid
     \return nearest grid
+
+    TODO: remove this
 */
-UniformGrid traverseTreeForGird(uint mortonCode)
+UniformGrid traverseTreeForGird<S : ISampleGenerator>(uint mortonCode, out float pdf, inout S sg)
 {
     UniformGrid grid = {};
     uint currNodeId = 0;
@@ -119,12 +121,7 @@ UniformGrid traverseTreeForGird(uint mortonCode)
         // choose one child
         bool isLeaf = false;
 
-        // >>> Stragety 1: traverse by morton code
         if (mortonCode <= currNode.splitMortonCode)
-        // >>> Stragety 2: traverse by position
-        // if (distance(pos, lChildPos) < distance(pos, rChildPos))
-        // >>> Stragety 3: traverse by intensity & position
-        // if (lIntensity / distance(pos, lChildPos) / distance(pos, lChildPos) > rIntensity / distance(pos, rChildPos) / distance(pos, rChildPos))
         {
             // Left child
             currNodeId = lChild;
@@ -148,7 +145,7 @@ UniformGrid traverseTreeForGird(uint mortonCode)
             currNode = gInternalNodes[currNodeId];
         }
     }
-
+    pdf = 1.f;
     return grid;
 }
 
@@ -221,12 +218,7 @@ UniformGrid traverseTreeForGird<S : ISampleGenerator>(const ShadingData sd, floa
         bool isLeaf = false;
         float pL, pR;
         // TODO: make a function for weigh type select
-        if (kTreeTraverseWeightType == (uint)TreeTraverseWeightType::Direction)
-        {
-            pL = clamp(dot(dir, lChildDir), 0.0f, 1.f);
-            pR = clamp(dot(dir, rChildDir), 0.0f, 1.f);
-        }
-        else if (kTreeTraverseWeightType == (uint)TreeTraverseWeightType::DistanceIntensity)
+        if (kTreeTraverseWeightType == (uint)TreeTraverseWeightType::DistanceIntensity)
         {
             pL = length(lChildIntensity) / lChildDis / lChildDis;
             pR = length(rChildIntensity) / rChildDis / rChildDis;
@@ -235,8 +227,6 @@ UniformGrid traverseTreeForGird<S : ISampleGenerator>(const ShadingData sd, floa
         {
             pL = length(lChildIntensity) * clamp(dot(dir, lChildDir), 0.0f, 1.f) / lChildDis / lChildDis;
             pR = length(rChildIntensity) * clamp(dot(dir, rChildDir), 0.0f, 1.f) / rChildDis / rChildDis;
-            // pL = length(lChildIntensity) * clamp(dot(sd.N, lChildDir), 0.0f, 1.f) / lChildDis / lChildDis;
-            // pR = length(rChildIntensity) * clamp(dot(sd.N, rChildDir), 0.0f, 1.f) / rChildDis / rChildDis;
         }
         else if (kTreeTraverseWeightType == (uint)TreeTraverseWeightType::BRDFShading)
         {
@@ -249,7 +239,6 @@ UniformGrid traverseTreeForGird<S : ISampleGenerator>(const ShadingData sd, floa
         }
         float p = max(pL + pR, 0.00001f);
         if (sampleNext1D(sg) < pL / p)
-        //if (pL > pR)
         {
             // Left child
             currNodeId = lChild;
@@ -287,4 +276,239 @@ uint traverseTreeForLight(uint root)
 {
     // TODO: we implemented it in SelectGridAndLight.cs.slang > chooseTriangle
     return 0;
+}
+
+// ---------------- Octree Code ----------------- //
+// TODO: find a better place
+
+StructuredBuffer<OctreeNode> gOctree;
+
+// TODO: better way to solve cbuffer name conflict
+cbuffer PerFrameOctreeCB
+{
+	uint octreeRootIndex;
+}
+
+bool checkPrefix(uint mortonCode1, uint mortonCode2, uint prefixLength)
+{
+    uint mask = 0xFFFFFFFF << (30 - prefixLength);
+    return (mortonCode1 & mask) == (mortonCode2 & mask);
+}
+
+void buildGridByGridNode(in OctreeNode gridNode, out UniformGrid grid)
+{
+    grid.pos = gridNode.pos;
+    grid.intensity = gridNode.intensity;
+    grid.range = gridNode.triangleRange;
+    grid.rootNode = 0;
+    grid.isLeafNode = true;
+}
+
+// TODO: remove duplicate code with computeBoundByMortonCode
+AABB computeAABBByMortonCode(uint mortonCode, uint prefixLength)
+{
+    uint maskMin = 0xFFFFFFFF << (30 - prefixLength);
+    uint mortonCodeMin = mortonCode & (maskMin);
+    uint maskMax = 1 << (30 - prefixLength);
+    uint mortonCodeMax = mortonCode | (maskMax - 1);
+
+    float3 quantPosMin = float3(deinterleave_uint3(mortonCodeMin)) / quantLevels;
+    float3 quantPosMax = float3(deinterleave_uint3(mortonCodeMax)) / quantLevels;
+
+    float3 minPos = quantPosMin * sceneBound.extent() + sceneBound.minPoint;
+    float3 maxPos = quantPosMax * sceneBound.extent() + sceneBound.minPoint;
+
+    AABB aabb;
+    aabb.minPoint = minPos;
+    aabb.maxPoint = maxPos;
+    return aabb;
+}
+
+/** Compute the near and far intersections of the cube (stored in the x and y components) using the slab method.
+    No intersection means vec.x > vec.y (really tNear > tFar).
+    https://gist.github.com/DomNomNom/46bb1ce47f68d255fd5d
+    TODO: combine duplicate code in SelectGridAndLight.cs.slang
+*/
+float2 intersectWithBound(const float3 rayOrigin, const float3 rayDir, const AABB aabb)
+{
+    float3 tMin = (aabb.minPoint - rayOrigin) / rayDir;
+    float3 tMax = (aabb.maxPoint - rayOrigin) / rayDir;
+    float3 t1 = min(tMin, tMax);
+    float3 t2 = max(tMin, tMax);
+    float tNear = max(max(t1.x, t1.y), t1.z);
+    float tFar = min(min(t2.x, t2.y), t2.z);
+    return float2(tNear, tFar);
+}
+
+float computeOctreeNodeWeight(const ShadingData sd, const OctreeNode node)
+{
+    float weight = 0.f;
+    float3 dir = normalize(node.pos - sd.posW);
+    float  distance = length(node.pos - sd.posW);
+    if (kTreeTraverseWeightType == (uint)TreeTraverseWeightType::DistanceIntensity)
+    {
+        weight = length(node.intensity) / distance / distance;
+    }
+    else if (kTreeTraverseWeightType == (uint)TreeTraverseWeightType::BRDFShading)
+    {
+        weight = length(evalBSDFCosine(sd, dir) * node.intensity) / distance / distance;
+    }
+    return weight;
+}
+
+UniformGrid traverseOctree<S : ISampleGenerator>(const ShadingData sd, out float pdf, inout S sg)
+{
+    UniformGrid grid = {};
+    pdf = 1.f;
+
+    uint currNodeIdx = octreeRootIndex;
+    while (true)
+    {
+        OctreeNode currNode = gOctree[currNodeIdx];
+
+        if (currNode.isLeaf)
+        {
+            buildGridByGridNode(currNode, grid);
+            break;
+        }
+
+        uint nextNodeIdx = currNodeIdx; // next child grid to traverse
+        float nextNodePdf = 0.00001f;
+        float weightSum = 0.00001f;
+        for (int i = currNode.childRange.x; i <= currNode.childRange.y; i++)
+        {
+            OctreeNode child = gOctree[i];
+
+            // float childDistance = max(distance(child.pos, sd.posW), 0.0001f);
+            // float childWeight = length(child.intensity) / childDistance / childDistance;
+            float childWeight = computeOctreeNodeWeight(sd, child);
+            
+            weightSum += childWeight;
+            if (sampleNext1D(sg) < childWeight / weightSum)
+            {
+                nextNodeIdx = i;
+                nextNodePdf = childWeight;
+            }
+        }
+        nextNodePdf = nextNodePdf / weightSum;
+
+        // can't find a child to traverse
+        if (nextNodeIdx == currNodeIdx)
+        {
+            buildGridByGridNode(currNode, grid);
+            break;
+        }
+        else
+        {
+            pdf *= nextNodePdf;
+            currNodeIdx = nextNodeIdx;
+        }
+    }
+
+    return grid;
+}
+
+UniformGrid traverseOctree<S : ISampleGenerator>(const ShadingData sd, float3 dir, out float pdf, inout S sg)
+{
+    UniformGrid grid = {};
+    pdf = 1.f;
+
+
+    uint currNodeIdx = octreeRootIndex;
+    while (true)
+    {
+        OctreeNode currNode = gOctree[currNodeIdx];
+
+        if (currNode.isLeaf)
+        {
+            buildGridByGridNode(currNode, grid);
+            break;
+        }
+
+        uint nextNodeIdx = currNodeIdx; // next child grid to traverse
+        float nextNodePdf = 0.00001f;
+        float weightSum = 0.00001f;
+        int   candidateCount = 0;
+        for (int i = currNode.childRange.x; i <= currNode.childRange.y; i++)
+        {
+            OctreeNode child = gOctree[i];
+            AABB childBound = computeAABBByMortonCode(child.mortonCode, child.prefixLength);
+            float2 intersectT = intersectWithBound(sd.posW, dir, childBound);
+
+            float childWeight = 0.f;
+            float3 intersectPoint = sd.posW + dir * (intersectT.x + intersectT.y) * 0.5f;
+            // Strategy 1: compute distance to intersection point
+            // float childDistance = max(distance(child.pos, intersectPoint), 0.0001f);
+            // Strategy 2: compute distance to shading point
+            float childDistance = max(distance(child.pos, sd.posW), 0.0001f);
+            float3 bsdf = evalBSDFCosine(sd, normalize(child.pos - sd.posW));
+            if (intersectT.x <= intersectT.y) // if intersect
+            {
+                childWeight = length(bsdf * child.intensity) / childDistance / childDistance;
+                // childWeight = length(child.intensity) / childDistance / childDistance;
+                candidateCount++;
+            }
+
+            weightSum += childWeight;
+            if (sampleNext1D(sg) < childWeight / weightSum)
+            {
+                nextNodeIdx = i;
+                nextNodePdf = childWeight;
+            }
+        }
+        nextNodePdf = nextNodePdf / weightSum;
+
+        // can't find a child to traverse
+        if (nextNodeIdx == currNodeIdx)
+        {
+            buildGridByGridNode(currNode, grid);
+            break;
+        }
+        else
+        {
+            pdf *= nextNodePdf;
+            currNodeIdx = nextNodeIdx;
+        }
+    }
+
+    return grid;
+}
+
+UniformGrid findContainingGird(uint mortonCode)
+{
+    UniformGrid grid = {};
+
+    uint currNodeIdx = octreeRootIndex;
+    while (true)
+    {
+        OctreeNode currNode = gOctree[currNodeIdx];
+
+        if (currNode.isLeaf)
+        {
+            buildGridByGridNode(currNode, grid);
+            break;
+        }
+
+        uint nextNodeIdx = currNodeIdx; // next child grid to traverse
+        for (int i = currNode.childRange.x; i <= currNode.childRange.y; i++)
+        {
+            OctreeNode child = gOctree[i];
+            if (checkPrefix(child.mortonCode, mortonCode, child.prefixLength))
+            {
+                nextNodeIdx = i;
+                break;
+            }
+        }
+
+        // can't find a child containg this morton code
+        if (nextNodeIdx == currNodeIdx)
+        {
+            buildGridByGridNode(currNode, grid);
+            break;
+        }
+        else
+            currNodeIdx = nextNodeIdx;
+    }
+
+    return grid;
 }

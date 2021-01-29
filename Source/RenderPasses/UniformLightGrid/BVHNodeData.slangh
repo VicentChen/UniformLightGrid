@@ -1,7 +1,9 @@
 #pragma once
 #include "Utils/HostDeviceShared.slangh"
 
+// FIXME: we need to use uint in c++, uint was declared in Falcor naming space
 BEGIN_NAMESPACE_FALCOR
+
 // TODO: merge two node types into BVHNode
 struct BVHInternalNode
 {

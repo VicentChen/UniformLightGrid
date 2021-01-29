@@ -2,16 +2,15 @@
 
 enum class TreeTraverseWeightType
 {
-    Direction                   = 1,
-    DistanceIntensity           = 2,
-    DirectionDistanceIntensity  = 3,
-    BRDFShading                 = 4,
+    DistanceIntensity           = 1,
+    DirectionDistanceIntensity  = 2,
+    BRDFShading                 = 3,
 };
 
 enum class GridSelectionStrategy
 {
-    MortonCodeAndBRDF           = 1, // >>> This will lead to blocking
-    TreeTraversal               = 2, // >>> This cannot select nearing lights
+    Octree                      = 1, // >>> This will lead to blocking
+    BVH                         = 2, // >>> This cannot select nearing lights
     Resampling                  = 3, // >>> BUG: This cannot select light for some walls
 };
 

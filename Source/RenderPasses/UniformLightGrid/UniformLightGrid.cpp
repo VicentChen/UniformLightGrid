@@ -132,6 +132,7 @@ void UniformLightGrid::generateBVHLeafNodes(RenderContext* pRenderContext)
         mpLeafNodeGenerator = ComputePass::create(kGenBVHLeafNodesFile, "genBVHLeafNodes", leafGeneratorDefines);
     }
 
+    // TODO: reuse createAndCopyBuffer() code
     uint32_t emissiveTriangleCount = mpScene->getLightCollection(pRenderContext)->getTotalLightCount();
     if (!mpBVHLeafNodesBuffer || mpBVHLeafNodesBuffer->getElementCount() < emissiveTriangleCount)
     {
@@ -199,8 +200,10 @@ void UniformLightGrid::constructBVHTree(RenderContext* pRenderContext)
     mpBVHConstructor->execute(pRenderContext, internalNodeCount, 1, 1);
 }
 
-void UniformLightGrid::generateUniformGrids()
+void UniformLightGrid::generateUniformGrids(RenderContext* pRenderContext)
 {
+    assert(mLeafNodes.size() > 0);
+
     PROFILE("ULG_generateUniformGrids");
 
     AABB sceneBound = sceneBoundHelper();
@@ -208,7 +211,7 @@ void UniformLightGrid::generateUniformGrids()
     mGrids.clear();
     for (size_t i = 0; i < mLeafNodes.size();)
     {
-        uint mask = ~(0xFFFFFF << (30 - mGridAndLightSelectorParams.gridMortonCodePrefixLength));
+        uint mask = ~(0xFFFFFFFF << (30 - mGridAndLightSelectorParams.gridMortonCodePrefixLength));
         uint bound = mLeafNodes[i].mortonCode | mask;
 
         float3 intensity = float3(0, 0, 0);
@@ -230,6 +233,87 @@ void UniformLightGrid::generateUniformGrids()
 
         mGrids.emplace_back(grid);
     }
+
+    createAndCopyBuffer(pRenderContext, mpGridDataBuffer, mpGridDataStagingBuffer, sizeof(UniformGrid), (uint)mGrids.size(), mGrids.data(), "ULG::mpGridDataBuffer", "ULG::mpGridDataBufferHelper");
+}
+
+void UniformLightGrid::generateOctree(RenderContext* pRenderContext)
+{
+    assert(mLeafNodes.size() > 0);
+
+    PROFILE("ULG_generateOctree");
+
+    AABB sceneBound = sceneBoundHelper();
+
+    mOctreeNodes.clear();
+    // generate leaves
+    for (size_t i = 0; i < mLeafNodes.size();)
+    {
+        uint mask = ~(0xFFFFFFFF << (30 - mGridAndLightSelectorParams.gridMortonCodePrefixLength));
+        uint bound = mLeafNodes[i].mortonCode | mask;
+
+        float3 intensity = float3(0, 0, 0);
+
+        size_t beginIdx = i;
+        while (i < mLeafNodes.size() && mLeafNodes[i].mortonCode <= bound)
+        {
+            intensity += mLeafNodes[i].intensity;
+            i++;
+        }
+        size_t endIdx = i - 1;
+
+        OctreeNode grid;
+        grid.pos = computePosByMortonCode(bound, mGridAndLightSelectorParams.gridMortonCodePrefixLength, kQuantLevels, sceneBound);
+        grid.mortonCode = bound;
+        grid.intensity = intensity;
+        grid.childRange = uint2(beginIdx, endIdx);
+        grid.triangleRange = uint2(beginIdx, endIdx);
+        grid.isLeaf = true;
+        grid.prefixLength = mGridAndLightSelectorParams.gridMortonCodePrefixLength;
+        grid.paddingAndDebug = float3(mOctreeNodes.size(), 0, 0);
+
+        mOctreeNodes.emplace_back(grid);
+    }
+
+    // generate internal nodes
+    // TODO: too many duplicate code
+    size_t prevLevelBegin = 0, prevLevelEnd = mOctreeNodes.size();
+    for (uint currPrefixLength = mGridAndLightSelectorParams.gridMortonCodePrefixLength - 3; currPrefixLength > 0; currPrefixLength -= 3)
+    {
+        if (prevLevelEnd - prevLevelBegin <= 1) break; // early end if previous level has only one grid
+
+        for (size_t i = prevLevelBegin; i < prevLevelEnd;)
+        {
+            uint mask = ~(0xFFFFFFFF << (30 - currPrefixLength));
+            uint bound = mOctreeNodes[i].mortonCode | mask;
+
+            float3 intensity = float3(0, 0, 0);
+
+            size_t beginIdx = i;
+            while (i < prevLevelEnd && mOctreeNodes[i].mortonCode <= bound)
+            {
+                intensity += mOctreeNodes[i].intensity;
+                i++;
+            }
+            size_t endIdx = i - 1;
+
+            OctreeNode grid;
+            grid.pos = computePosByMortonCode(bound, currPrefixLength, kQuantLevels, sceneBound);
+            grid.intensity = intensity;
+            grid.mortonCode = bound;
+            grid.childRange = uint2(beginIdx, endIdx);
+            grid.triangleRange = uint2(mOctreeNodes[beginIdx].triangleRange.x, mOctreeNodes[endIdx].triangleRange.y); // merge two range
+            grid.isLeaf = false;
+            grid.prefixLength = currPrefixLength;
+            grid.paddingAndDebug = float3(mOctreeNodes.size(), 0, 0);
+
+            mOctreeNodes.emplace_back(grid);
+        }
+        prevLevelBegin = prevLevelEnd;
+        prevLevelEnd = mOctreeNodes.size();
+    }
+
+    createAndCopyBuffer(pRenderContext, mpOctreeDataBuffer, mpOctreeDataStagingBuffer, sizeof(OctreeNode), (uint)mOctreeNodes.size(), mOctreeNodes.data(), "ULG::mpOctreeDataBuffer", "ULG::mpOctreeDataBufferHelper");
 }
 
 void UniformLightGrid::chooseGridsAndLights(RenderContext* pRenderContext, const RenderData& renderData)
@@ -238,7 +322,7 @@ void UniformLightGrid::chooseGridsAndLights(RenderContext* pRenderContext, const
 
     // TODO: find a better place for program creation
     // Create grid and light selector program
-    if (mpGridAndLightSelector == nullptr)
+    if (mpGridAndLightSelector == nullptr || mGridAndLightSelectorParams.needToRegenerateSelector)
     {
         assert(mpScene);
         Program::DefineList gridAndLightSelectorDefines = mpScene->getSceneDefines();
@@ -248,28 +332,6 @@ void UniformLightGrid::chooseGridsAndLights(RenderContext* pRenderContext, const
         addGridAndLightSelectorStaticParams(gridAndLightSelectorDefines);
         mpGridAndLightSelector = ComputePass::create(kGridAndLightSelectorFile, "selectGridAndLight", gridAndLightSelectorDefines);
         setStaticParams(mpGridAndLightSelector->getProgram().get()); // BUG: defines will not be added after compute program created
-    }
-
-    // prepare grid data
-    generateUniformGrids();
-    if (!mpGridDataBuffer || mpGridDataBuffer->getElementCount() < mGrids.size())
-    {
-        uint32_t gridSize = (uint32_t)mGrids.size();
-        mpGridDataBuffer = Buffer::createStructured(mpGridAndLightSelector->getRootVar()["gGrids"], gridSize, Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false);
-        mpGridDataBuffer->setName("ULG::mpGridDataBuffer");
-
-        mpGridDataHelperBuffer = Buffer::createStructured(mpGridAndLightSelector->getRootVar()["gGrids"], gridSize, Resource::BindFlags::None, Buffer::CpuAccess::Write);
-        mpGridDataHelperBuffer->setName("ULG::mpGridDataBufferHelper");
-    }
-
-    // Copy grid data to gpu
-    {
-        size_t bufferSize = sizeof(UniformGrid) * mGrids.size();
-        UniformGrid* pGrids = (UniformGrid*)mpGridDataHelperBuffer->map(Buffer::MapType::Write);
-        memcpy(pGrids, mGrids.data(), bufferSize);
-        mpGridDataHelperBuffer->unmap();
-
-        pRenderContext->copyBufferRegion(mpGridDataBuffer.get(), 0, mpGridDataHelperBuffer.get(), 0, bufferSize);
     }
 
     Texture::SharedPtr pLightIndexTexture = renderData[kLightIndexInternal]->asTexture();
@@ -297,6 +359,9 @@ void UniformLightGrid::chooseGridsAndLights(RenderContext* pRenderContext, const
     mpGridAndLightSelector.getRootVar()["gLeafNodes"] = mpBVHLeafNodesBuffer;
     mpGridAndLightSelector.getRootVar()["gInternalNodes"] = mpBVHInternalNodesBuffer;
     mpGridAndLightSelector.getRootVar()["gGrids"] = mpGridDataBuffer;
+
+    mpGridAndLightSelector.getRootVar()["gOctree"] = mpOctreeDataBuffer;
+    mpGridAndLightSelector.getRootVar()["PerFrameOctreeCB"]["octreeRootIndex"] = mOctreeNodes.size() - 1;
 
     auto var = mpGridAndLightSelector.getRootVar()["PerFrameCB"];
     var["dispatchDim"] = mSharedParams.frameDim;
@@ -345,6 +410,8 @@ void UniformLightGrid::execute(RenderContext* pRenderContext, const RenderData& 
     // ----- Uniform Light Grid Codes ----- //
     generateBVHLeafNodes(pRenderContext);
     sortLeafNodes(pRenderContext);
+    generateUniformGrids(pRenderContext);
+    generateOctree(pRenderContext);
     constructBVHTree(pRenderContext);
 
     chooseGridsAndLights(pRenderContext, renderData);
@@ -415,7 +482,8 @@ void UniformLightGrid::renderUI(Gui::Widgets& widget)
     widget.var("output color amplifer", mAmplifyCofficient, 1.0f, 100.0f, 1.0f);
 
     {
-        bool regenerateSelector = false;
+        // we can't add define for compute pass, so we regenerate it every time defines change
+        mGridAndLightSelectorParams.needToRegenerateSelector = false;
         widget.text("Grid & Light Selector Params");
         widget.var("grid morton code prefix length", mGridAndLightSelectorParams.gridMortonCodePrefixLength, 3u, 27u, 3u);
         widget.var("min distance of grid selection", mGridAndLightSelectorParams.minDistanceOfGirdSelection, 0.1f, 100.0f, 0.1f);
@@ -423,27 +491,23 @@ void UniformLightGrid::renderUI(Gui::Widgets& widget)
 
         { // Grid selection strategy gui component
             Gui::DropdownList list;
-            list.push_back({ (uint)GridSelectionStrategy::MortonCodeAndBRDF, "MortonCodeAndBRDF" });
-            list.push_back({ (uint)GridSelectionStrategy::TreeTraversal, "TreeTraversal" });
+            list.push_back({ (uint)GridSelectionStrategy::Octree, "Octree" });
+            list.push_back({ (uint)GridSelectionStrategy::BVH, "BVH" });
             list.push_back({ (uint)GridSelectionStrategy::Resampling, "Resampling" });
             if (widget.dropdown("Grid selection strategy", list, mGridAndLightSelectorParams.gridSelectionStrategy))
-                regenerateSelector = true;
+                mGridAndLightSelectorParams.needToRegenerateSelector = true;
         }
 
         // Tree traverse weight gui component
-        if (mGridAndLightSelectorParams.gridSelectionStrategy == (uint)GridSelectionStrategy::TreeTraversal)
+        if (mGridAndLightSelectorParams.gridSelectionStrategy == (uint)GridSelectionStrategy::Octree || mGridAndLightSelectorParams.gridSelectionStrategy == (uint)GridSelectionStrategy::BVH)
         {
             Gui::DropdownList list;
-            list.push_back({ (uint)TreeTraverseWeightType::Direction, "Direction" });
             list.push_back({ (uint)TreeTraverseWeightType::DistanceIntensity, "DistanceIntensity" });
             list.push_back({ (uint)TreeTraverseWeightType::DirectionDistanceIntensity, "DirectionDistanceIntensity" });
             list.push_back({ (uint)TreeTraverseWeightType::BRDFShading, "BRDFShading" });
             if (widget.dropdown("Tree traverse weight type", list, mGridAndLightSelectorParams.treeTraverseWeightType))
-                regenerateSelector = true;
+                mGridAndLightSelectorParams.needToRegenerateSelector = true;
         }
-
-        // we can't add define for compute pass, so we regenerate it every time defines change
-        if (regenerateSelector) mpGridAndLightSelector = nullptr;
     }
 
     widget.text("ULG Tracer Params");

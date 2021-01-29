@@ -26,6 +26,7 @@
   </ImportGroup>
   <ItemGroup>
     <ClCompile Include="UniformLightGrid.cpp" />
+    <ClCompile Include="UniformLightGridCommon.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="UniformLightGrid.h" />
