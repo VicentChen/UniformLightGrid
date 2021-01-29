@@ -1,7 +1,6 @@
 #pragma once
 #include "Utils/HostDeviceShared.slangh"
 
-// FIXME: we need to use uint in c++, uint was declared in Falcor naming space
 BEGIN_NAMESPACE_FALCOR
 
 struct UniformGrid
@@ -11,10 +10,9 @@ struct UniformGrid
     uint2 range = uint2(0, 0);
 
     uint rootNode = 0; // TODO: rename
+    uint mortonCode = 0;
     bool isLeafNode = false;
-
-    // above attributes use 10 * 4 bytes, add 2 * 4 bytes padding
-    float2 paddingAndDebug = float2(0, 0);
+    // TODO: compute padding
 };
 
 struct OctreeNode

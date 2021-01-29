@@ -4,13 +4,14 @@
 //   3. remove min and max in `setIsLChildLeaf` and `setIsRChildLeaf`
 //   4. add temp variable for getters and setters in `generateTree`
 #include "BVHNodeData.slangh"
+#include "GridData.slangh"
 
 #ifndef GROUP_SIZE
     // Compile-time error if GROUP_SIZE is not defined.
     #error GROUP_SIZE is not defined. Add define in cpp file.
 #endif
 
-StructuredBuffer<BVHLeafNode> gLeafNodes;
+StructuredBuffer<UniformGrid> gLeafNodes;
 RWStructuredBuffer<BVHInternalNode> gInternalNodes;
 
 cbuffer PerFrameCB

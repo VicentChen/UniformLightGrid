@@ -183,7 +183,7 @@ void UniformLightGrid::constructBVHTree(RenderContext* pRenderContext)
 {
     PROFILE("ULG_constructBVHTree");
 
-    uint32_t leafNodeCount = mpScene->getLightCollection(pRenderContext)->getTotalLightCount();
+    uint32_t leafNodeCount = (uint32_t)mGrids.size();
     uint32_t internalNodeCount = leafNodeCount - 1;
 
     if (!mpBVHInternalNodesBuffer || mpBVHInternalNodesBuffer->getElementCount() < internalNodeCount)
@@ -194,7 +194,7 @@ void UniformLightGrid::constructBVHTree(RenderContext* pRenderContext)
 
     auto var = mpBVHConstructor->getRootVar()["PerFrameCB"];
     var["numLeafNodes"] = leafNodeCount;
-    mpBVHConstructor->getRootVar()["gLeafNodes"] = mpBVHLeafNodesBuffer;
+    mpBVHConstructor->getRootVar()["gLeafNodes"] = mpGridDataBuffer;
     mpBVHConstructor->getRootVar()["gInternalNodes"] = mpBVHInternalNodesBuffer;
 
     mpBVHConstructor->execute(pRenderContext, internalNodeCount, 1, 1);
@@ -228,7 +228,8 @@ void UniformLightGrid::generateUniformGrids(RenderContext* pRenderContext)
         grid.pos = computePosByMortonCode(bound, mGridAndLightSelectorParams.gridMortonCodePrefixLength, kQuantLevels, sceneBound);
         grid.intensity = intensity;
         grid.range = uint2(beginIdx, endIdx);
-        grid.rootNode = 0;
+        grid.rootNode = (uint32_t)mGrids.size();
+        grid.mortonCode = bound;
         grid.isLeafNode = false;
 
         mGrids.emplace_back(grid);

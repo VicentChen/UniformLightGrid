@@ -31,7 +31,6 @@ cbuffer PerFrameCB
 }
 
 // TODO: find better place
-StructuredBuffer<UniformGrid> gGrids;
 
 // float4: triangleIndex, pdf, ??, ??
 RWTexture2D<float4> gLightIndex;
@@ -267,21 +266,25 @@ void selectGridByResampling<S : ISampleGenerator>(const ShadingData sd, inout S 
 }
 
 // TODO: check this when use
-void chooseTriangle<S : ISampleGenerator>(in uint2 range, float3 dir, float3 pos, out uint triangleIdx, out float pdf, inout S sg)
+void chooseTriangle<S : ISampleGenerator>(in uint2 range, in const ShadingData sd, inout S sg, out uint triangleIdx, out float pdf)
 {
-    float weightSum = 0;
+    float weightSum = 1e-10;
     float pHat = 0;
     float choosenPHat = 0;
     pdf = 0;
     triangleIdx = range.x;
-    for (int i = 0; i < 4; i++) // TODO:: make 4 a variable
+    float3 pos = sd.posW;
+    uint RISCount = 4; // TODO: add to UI
+    for (int i = 0; i < RISCount; i++) // TODO:: make 4 a variable
     {
         uint idx = 0;
         float delta = range.y - range.x + 1;
         float x = sampleNext1D(sg) * 0.999999f; // FIXME: hack to avoid x == 1
         idx = floor(range.x + x * delta);
         BVHLeafNode node = gLeafNodes[idx];
-        pHat = dot(normalize(node.debug.xyz - pos), dir) * length(node.intensity);
+        float distance = length(node.debug.xyz - pos);
+        // pHat = length(node.intensity) / distance / distance * delta;
+        pHat = 100.f / distance / distance * delta;
         weightSum += pHat;
         if (sampleNext1D(sg) < pHat / weightSum)
         {
@@ -289,7 +292,7 @@ void chooseTriangle<S : ISampleGenerator>(in uint2 range, float3 dir, float3 pos
             choosenPHat = pHat;
         }
     }
-    pdf = choosenPHat * 4 / weightSum;
+    pdf = choosenPHat * RISCount / weightSum;
 }
 
 [numthreads(CHUNK_SIZE, CHUNK_SIZE, 1)]
@@ -325,10 +328,11 @@ void selectGridAndLight(uint3 dispatchThreadId : SV_DispatchThreadID)
         uint leafNodeIdx;
         float idxPdf;
         sampleRangeUniformly(chosenGrid.range, sg, leafNodeIdx, idxPdf);
+        // chooseTriangle(chosenGrid.range, sd, sg, leafNodeIdx, idxPdf);
         uint emissiveTriangleIndex = gLeafNodes[leafNodeIdx].triangleIdx;
         float emissivePdf = chosenGridPdf * idxPdf;
 
-        result = float4(emissiveTriangleIndex, emissivePdf, chosenGridPdf, 1.f);
+        result = float4(emissiveTriangleIndex, emissivePdf, chosenGrid.rootNode, 1);
     }
 
     gLightIndex[launchIndex] = result;
@@ -400,4 +404,72 @@ void selectGridAndLight(uint3 dispatchThreadId : SV_DispatchThreadID)
 //     float chosenGridWeight = length(chosenGridBSDF * chosenGrid.intensity) / max((chosenGridDistance * chosenGridDistance), 0.0001f);
 //     chosenGridPdf = chosenGridWeight * samplesPerDirection / max(weightSum, 0.0001f);
 //         // ------------------------ BUG ------------------------ //
+// }
+
+// uint search(uint mortonCode)
+// {
+//     uint2 range = uint2(0, gridCount - 1);
+//     uint mid = (range.x + range.y) * 0.5f;
+//     while (range.y - range.x >= 1 )
+//         range = gGrids[mid].mortonCode < mortonCode ? uint2(mid, range.y) : uint2(range.x, mid);
+
+//     return range.x;
+// }
+
+// void selectGridByResampling<S : ISampleGenerator>(const ShadingData sd, inout S sg, out UniformGrid chosenGrid, out float chosenGridPdf)
+// {
+//     float3 pos = sd.posW;
+
+//     float3 extent = float3(300,300,300);
+
+//     float3 minPos = pos - extent;
+//     float3 maxPos = pos - extent;
+
+
+//     // float3 normMinPos = (minPos - realSceneBound.minPoint) / realSceneBound.extent();
+//     // uint3 quantMinPos = min(max(0, uint3(normMinPos * quantLevels)), quantLevels - 1);
+//     // uint mortonCodeMin = interleave_uint3(quantMinPos);
+
+//     // float3 normMaxPos = (maxPos - realSceneBound.minPoint) / realSceneBound.extent();
+//     // uint3 quantMaxPos = min(max(0, uint3(normMaxPos * quantLevels)), quantLevels - 1);
+//     // uint mortonCodeMax = interleave_uint3(quantMaxPos);
+
+//     uint2 range = uint2(0,0);
+//     // range.x = search(mortonCodeMin);
+//     // range.y = search(mortonCodeMax);
+//     range.x = floor(sampleNext1D(sg) * 0.999999f * gridCount);
+//     range.y = floor(sampleNext1D(sg) * 0.999999f * gridCount);
+//     if (range.x > range.y)
+//     {
+//         uint temp = range.x;
+//         range.x = range.y;
+//         range.y = temp;
+//     }
+//     if (range.x == range.y) range = uint2(0, gridCount - 1);
+//     uint rangeLength = range.y - range.x + 1;
+//     float gridPdf = 1.f / rangeLength;
+
+//     float weightSum = 1e-10;
+//     float3 chosenGridBSDF = 0;
+//     float  chosenGridDistance = 0;
+//     for (int i = 0; i < samplesPerDirection; i++)
+//     {
+//         uint gridIdx = uint(floor(sampleNext1D(sg) * 0.999999f * rangeLength)) + range.x;
+//         UniformGrid grid = gGrids[gridIdx];
+//         float3 dir = normalize(grid.pos - pos);
+//         float distance = length(grid.pos - pos);
+//         float3 bsdf = evalBSDFCosine(sd, dir);
+
+//         float gridWeight = length(bsdf * grid.intensity) / (distance * distance) / gridPdf;
+//         weightSum += gridWeight;
+//         if (sampleNext1D(sg) < gridWeight / weightSum)
+//         {
+//             chosenGrid = grid;
+//             chosenGridBSDF = bsdf;
+//             chosenGridDistance = distance;
+//         }
+//     }
+
+//     float chosenGridWeight = length(chosenGridBSDF * chosenGrid.intensity) / max((chosenGridDistance * chosenGridDistance), 0.0001f);
+//     chosenGridPdf = chosenGridWeight * samplesPerDirection / max(weightSum, 0.0001f);
 // }
