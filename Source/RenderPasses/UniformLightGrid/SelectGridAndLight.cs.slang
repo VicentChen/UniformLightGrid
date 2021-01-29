@@ -167,10 +167,10 @@ void selectGridByOctree<S : ISampleGenerator>(const ShadingData sd, inout S sg, 
         // recompute BSDF & distance
         float3 bsdf = float3(1,1,1);
         // float3 bsdf = evalBSDFCosine( sd, normalize(grid.pos - pos));;
-        float distance = length(grid.pos - pos);
 
         // ------------------------ BUG ------------------------ //
         // random choose by weight
+        float distance = length(grid.pos - pos);
         float gridWeight = length(bsdf * grid.intensity) / (distance * distance) / gridPdf;
         weightSum += gridWeight;
         if (sampleNext1D(sg) < gridWeight / weightSum)
@@ -332,7 +332,7 @@ void selectGridAndLight(uint3 dispatchThreadId : SV_DispatchThreadID)
         uint emissiveTriangleIndex = gLeafNodes[leafNodeIdx].triangleIdx;
         float emissivePdf = chosenGridPdf * idxPdf;
 
-        result = float4(emissiveTriangleIndex, emissivePdf, chosenGrid.rootNode, 1);
+        result = float4(emissiveTriangleIndex, emissivePdf, chosenGrid.gridIndex, 1);
     }
 
     gLightIndex[launchIndex] = result;

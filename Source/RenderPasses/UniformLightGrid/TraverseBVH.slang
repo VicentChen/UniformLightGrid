@@ -214,12 +214,12 @@ bool checkPrefix(uint mortonCode1, uint mortonCode2, uint prefixLength)
     return (mortonCode1 & mask) == (mortonCode2 & mask);
 }
 
-void buildGridByGridNode(in OctreeNode gridNode, out UniformGrid grid)
+void buildGridByGridNode(in OctreeNode octreeNode, out UniformGrid grid)
 {
-    grid.pos = gridNode.pos;
-    grid.intensity = gridNode.intensity;
-    grid.range = gridNode.triangleRange;
-    grid.rootNode = 0;
+    grid.pos = octreeNode.pos;
+    grid.intensity = octreeNode.intensity;
+    grid.range = octreeNode.triangleRange;
+    grid.gridIndex = octreeNode.paddingAndDebug.x;
     grid.isLeafNode = true;
 }
 
@@ -267,6 +267,10 @@ float computeOctreeNodeWeight(const ShadingData sd, const OctreeNode node)
     if (kTreeTraverseWeightType == (uint)TreeTraverseWeightType::DistanceIntensity)
     {
         weight = length(node.intensity) / distance / distance;
+    }
+    else if (kTreeTraverseWeightType == (uint)TreeTraverseWeightType::DirectionDistanceIntensity)
+    {
+        weight = 100 * length(node.intensity) / distance / distance; //pow(length(node.intensity), 4) / distance / distance;
     }
     else if (kTreeTraverseWeightType == (uint)TreeTraverseWeightType::BRDFShading)
     {

@@ -9,7 +9,7 @@ struct UniformGrid
     float3 intensity = float3(0, 0, 0);
     uint2 range = uint2(0, 0);
 
-    uint rootNode = 0; // TODO: rename
+    uint gridIndex = 0;
     uint mortonCode = 0;
     bool isLeafNode = false;
     // TODO: compute padding

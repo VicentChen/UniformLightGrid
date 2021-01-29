@@ -228,7 +228,7 @@ void UniformLightGrid::generateUniformGrids(RenderContext* pRenderContext)
         grid.pos = computePosByMortonCode(bound, mGridAndLightSelectorParams.gridMortonCodePrefixLength, kQuantLevels, sceneBound);
         grid.intensity = intensity;
         grid.range = uint2(beginIdx, endIdx);
-        grid.rootNode = (uint32_t)mGrids.size();
+        grid.gridIndex = (uint)mGrids.size();
         grid.mortonCode = bound;
         grid.isLeafNode = false;
 
