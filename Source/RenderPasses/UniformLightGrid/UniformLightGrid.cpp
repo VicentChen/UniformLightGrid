@@ -139,8 +139,8 @@ void UniformLightGrid::generateBVHLeafNodes(RenderContext* pRenderContext)
         mpBVHLeafNodesBuffer = Buffer::createStructured(mpLeafNodeGenerator->getRootVar()["gLeafNodes"], emissiveTriangleCount, Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false);
         mpBVHLeafNodesBuffer->setName("ULG::mpBVHLeafNodesBuffer");
 
-        mpBVHLeafNodesHelperBuffer = Buffer::createStructured(mpLeafNodeGenerator->getRootVar()["gLeafNodes"], emissiveTriangleCount, Resource::BindFlags::None, Buffer::CpuAccess::Write);
-        mpBVHLeafNodesHelperBuffer->setName("ULG::mpBVHLeafNodesHelperBuffer");
+        mpBVHLeafNodesStagingBuffer = Buffer::createStructured(mpLeafNodeGenerator->getRootVar()["gLeafNodes"], emissiveTriangleCount, Resource::BindFlags::None, Buffer::CpuAccess::Write);
+        mpBVHLeafNodesStagingBuffer->setName("ULG::mpBVHLeafNodesStagingBuffer");
     }
 
     // TODO: do we have better way to get scene bound?
@@ -172,11 +172,11 @@ void UniformLightGrid::sortLeafNodes(RenderContext* pRenderContext)
 
     std::sort(mLeafNodes.begin(), mLeafNodes.end(), [](const BVHLeafNode& a, const BVHLeafNode& b) { return a.mortonCode < b.mortonCode; });
 
-    pLeaves = (BVHLeafNode*)mpBVHLeafNodesHelperBuffer->map(Buffer::MapType::Write);
+    pLeaves = (BVHLeafNode*)mpBVHLeafNodesStagingBuffer->map(Buffer::MapType::Write);
     memcpy(pLeaves, mLeafNodes.data(), bufferSize);
-    mpBVHLeafNodesHelperBuffer->unmap();
+    mpBVHLeafNodesStagingBuffer->unmap();
 
-    pRenderContext->copyBufferRegion(mpBVHLeafNodesBuffer.get(), 0, mpBVHLeafNodesHelperBuffer.get(), 0, bufferSize);
+    pRenderContext->copyBufferRegion(mpBVHLeafNodesBuffer.get(), 0, mpBVHLeafNodesStagingBuffer.get(), 0, bufferSize);
 }
 
 void UniformLightGrid::constructBVHTree(RenderContext* pRenderContext)
@@ -241,81 +241,13 @@ void UniformLightGrid::generateUniformGrids(RenderContext* pRenderContext)
 
 void UniformLightGrid::generateOctree(RenderContext* pRenderContext)
 {
-    assert(mLeafNodes.size() > 0);
-
     PROFILE("ULG_generateOctree");
 
-    AABB sceneBound = sceneBoundHelper();
-
-    mOctreeNodes.clear();
-    // generate leaves
-    for (size_t i = 0; i < mLeafNodes.size();)
-    {
-        uint mask = ~(0xFFFFFFFF << (30 - mGridAndLightSelectorParams.gridMortonCodePrefixLength));
-        uint bound = mLeafNodes[i].mortonCode | mask;
-
-        float3 intensity = float3(0, 0, 0);
-
-        size_t beginIdx = i;
-        while (i < mLeafNodes.size() && mLeafNodes[i].mortonCode <= bound)
-        {
-            intensity += mLeafNodes[i].intensity;
-            i++;
-        }
-        size_t endIdx = i - 1;
-
-        OctreeNode grid;
-        grid.pos = computePosByMortonCode(bound, mGridAndLightSelectorParams.gridMortonCodePrefixLength, kQuantLevels, sceneBound);
-        grid.mortonCode = bound;
-        grid.intensity = intensity;
-        grid.childRange = uint2(beginIdx, endIdx);
-        grid.triangleRange = uint2(beginIdx, endIdx);
-        grid.isLeaf = true;
-        grid.prefixLength = mGridAndLightSelectorParams.gridMortonCodePrefixLength;
-        grid.paddingAndDebug = float3(mOctreeNodes.size(), 0, 0);
-
-        mOctreeNodes.emplace_back(grid);
-    }
-
-    // generate internal nodes
-    // TODO: too many duplicate code
-    size_t prevLevelBegin = 0, prevLevelEnd = mOctreeNodes.size();
-    for (uint currPrefixLength = mGridAndLightSelectorParams.gridMortonCodePrefixLength - 3; currPrefixLength > 0; currPrefixLength -= 3)
-    {
-        if (prevLevelEnd - prevLevelBegin <= 1) break; // early end if previous level has only one grid
-
-        for (size_t i = prevLevelBegin; i < prevLevelEnd;)
-        {
-            uint mask = ~(0xFFFFFFFF << (30 - currPrefixLength));
-            uint bound = mOctreeNodes[i].mortonCode | mask;
-
-            float3 intensity = float3(0, 0, 0);
-
-            size_t beginIdx = i;
-            while (i < prevLevelEnd && mOctreeNodes[i].mortonCode <= bound)
-            {
-                intensity += mOctreeNodes[i].intensity;
-                i++;
-            }
-            size_t endIdx = i - 1;
-
-            OctreeNode grid;
-            grid.pos = computePosByMortonCode(bound, currPrefixLength, kQuantLevels, sceneBound);
-            grid.intensity = intensity;
-            grid.mortonCode = bound;
-            grid.childRange = uint2(beginIdx, endIdx);
-            grid.triangleRange = uint2(mOctreeNodes[beginIdx].triangleRange.x, mOctreeNodes[endIdx].triangleRange.y); // merge two range
-            grid.isLeaf = false;
-            grid.prefixLength = currPrefixLength;
-            grid.paddingAndDebug = float3(mOctreeNodes.size(), 0, 0);
-
-            mOctreeNodes.emplace_back(grid);
-        }
-        prevLevelBegin = prevLevelEnd;
-        prevLevelEnd = mOctreeNodes.size();
-    }
-
-    createAndCopyBuffer(pRenderContext, mpOctreeDataBuffer, mpOctreeDataStagingBuffer, sizeof(OctreeNode), (uint)mOctreeNodes.size(), mOctreeNodes.data(), "ULG::mpOctreeDataBuffer", "ULG::mpOctreeDataBufferHelper");
+    Octree::Params octreeParams;
+    octreeParams.leafNodePrefixLength = mGridAndLightSelectorParams.gridMortonCodePrefixLength;
+    octreeParams.quantLevel = kQuantLevels;
+    octreeParams.sceneBound = sceneBoundHelper();
+    mOctree.buildOctree(pRenderContext, mLeafNodes, octreeParams);
 }
 
 void UniformLightGrid::chooseGridsAndLights(RenderContext* pRenderContext, const RenderData& renderData)
@@ -339,7 +271,6 @@ void UniformLightGrid::chooseGridsAndLights(RenderContext* pRenderContext, const
     Texture::SharedPtr pLightIndexTexture = renderData[kLightIndexInternal]->asTexture();
 
     // TODO: do we have better way to get scene bound?
-    //const auto& sceneBound = mpScene->getSceneBounds();
     // for grid selection, we need real scene bound and uniform scene bound here
     auto sceneBound = sceneBoundHelper();
     auto realSceneBound = mpScene->getSceneBounds();
@@ -362,8 +293,8 @@ void UniformLightGrid::chooseGridsAndLights(RenderContext* pRenderContext, const
     mpGridAndLightSelector.getRootVar()["gInternalNodes"] = mpBVHInternalNodesBuffer;
     mpGridAndLightSelector.getRootVar()["gGrids"] = mpGridDataBuffer;
 
-    mpGridAndLightSelector.getRootVar()["gOctree"] = mpOctreeDataBuffer;
-    mpGridAndLightSelector.getRootVar()["PerFrameOctreeCB"]["octreeRootIndex"] = mOctreeNodes.size() - 1;
+    mpGridAndLightSelector.getRootVar()["gOctree"] = mOctree.getGpuBufferPtr();
+    mpGridAndLightSelector.getRootVar()["PerFrameOctreeCB"]["octreeRootIndex"] = mOctree.getRootIndex();
 
     auto var = mpGridAndLightSelector.getRootVar()["PerFrameCB"];
     var["dispatchDim"] = mSharedParams.frameDim;

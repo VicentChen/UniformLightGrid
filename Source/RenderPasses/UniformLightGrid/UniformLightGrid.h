@@ -29,8 +29,7 @@
 #include "Falcor.h"
 #include "RenderPasses/Shared/PathTracer/PathTracer.h"
 #include "Utils/Algorithm/BitonicSort.h"
-#include "BVHNodeData.slangh"
-#include "GridData.slangh"
+#include "Octree.h"
 #include "ULGStaticParams.slang"
 
 using namespace Falcor;
@@ -99,7 +98,7 @@ private:
     // leaf node data
     std::vector<BVHLeafNode> mLeafNodes;
     Buffer::SharedPtr mpBVHLeafNodesBuffer;
-    Buffer::SharedPtr mpBVHLeafNodesHelperBuffer;
+    Buffer::SharedPtr mpBVHLeafNodesStagingBuffer;
     ComputePass::SharedPtr mpLeafNodeGenerator;
 
     // internal node data
@@ -107,13 +106,12 @@ private:
     ComputePass::SharedPtr mpBVHConstructor;
 
     // uniform grid data
-    std::vector<OctreeNode> mOctreeNodes;
-    Buffer::SharedPtr mpOctreeDataBuffer;
-    Buffer::SharedPtr mpOctreeDataStagingBuffer;
-
     std::vector<UniformGrid> mGrids;
     Buffer::SharedPtr mpGridDataBuffer;
     Buffer::SharedPtr mpGridDataStagingBuffer;
+
+    // octree data
+    Octree mOctree;
 
     // grid and light selection data
     struct

@@ -25,10 +25,12 @@
     <Import Project="..\..\Falcor\Falcor.props" />
   </ImportGroup>
   <ItemGroup>
+    <ClCompile Include="Octree.cpp" />
     <ClCompile Include="UniformLightGrid.cpp" />
     <ClCompile Include="UniformLightGridCommon.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Octree.h" />
     <ClInclude Include="UniformLightGrid.h" />
     <ClInclude Include="UniformLightGridCommon.h" />
   </ItemGroup>

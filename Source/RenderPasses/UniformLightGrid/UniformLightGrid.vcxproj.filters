@@ -3,10 +3,12 @@
   <ItemGroup>
     <ClCompile Include="UniformLightGrid.cpp" />
     <ClCompile Include="UniformLightGridCommon.cpp" />
+    <ClCompile Include="Octree.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="UniformLightGrid.h" />
     <ClInclude Include="UniformLightGridCommon.h" />
+    <ClInclude Include="Octree.h" />
   </ItemGroup>
   <ItemGroup>
     <ShaderSource Include="ULGTracer.rt.slang">
