@@ -1,11 +1,7 @@
 import Scene.Scene;
 import RenderPasses.Shared.PathTracer.LoadShadingData;
-import Experimental.Scene.Material.MaterialShading;
-import Utils.Math.AABB;
-import Utils.Math.BitTricks;
-import Utils.Sampling.SampleGenerator;
 import TraverseBVH;
-import ULGStaticParams;
+import Samplers;
 
 #ifndef CHUNK_SIZE
     // Compile-time error if GROUP_SIZE is not defined.
@@ -22,119 +18,13 @@ cbuffer PerFrameCB
     // TODO: rename this for restir
     uint samplesPerDirection;
 
-    // Duplicate in TraverseBVH.slang
-    // uint quantLevels;
-    // AABB sceneBound;
     AABB realSceneBound;
 
     uint gridCount; // TODO: better position?
 }
 
-// TODO: find better place
-
 // float4: triangleIndex, pdf, ??, ??
 RWTexture2D<float4> gLightIndex;
-
-/** Compute the near and far intersections of the cube (stored in the x and y components) using the slab method.
-    No intersection means vec.x > vec.y (really tNear > tFar).
-    https://gist.github.com/DomNomNom/46bb1ce47f68d255fd5d
-*/
-float intersectWithSceneBound(const float3 rayOrigin, const float3 rayDir)
-{
-    float3 tMin = (realSceneBound.minPoint - rayOrigin) / rayDir;
-    float3 tMax = (realSceneBound.maxPoint - rayOrigin) / rayDir;
-    float3 t1 = min(tMin, tMax);
-    float3 t2 = max(tMin, tMax);
-    // float tNear = max(max(t1.x, t1.y), t1.z);
-    float tFar = min(min(t2.x, t2.y), t2.z);
-    return tFar;
-}
-
-void sampleDistanceUniformly<S : ISampleGenerator>(const float dmin, const float dmax, inout S sg, out float d, out float pdf)
-{
-    // avoid dmin == dmax
-    float deltaD = dmax - dmin;
-    if (deltaD < 1E-5)
-    {
-        d = 0;
-        pdf = 1;
-        return;
-    }
-
-    float x = sampleNext1D(sg);
-    d = dmin + x * deltaD;
-    pdf = 1 / deltaD;
-}
-
-void sampleDistanceByDist<S : ISampleGenerator>(const float dmin, const float dmax, inout S sg, out float d, out float pdf)
-{
-    // avoid dmin == dmax
-    if (dmax - dmin < 1E-5)
-    {
-        d = 0;
-        pdf = 1;
-        return;
-    }
-
-    // sample with CDF
-    float c = 1 - (log(dmax) - log(dmin));
-    float x = sampleNext1D(sg);
-    d = c / x;
-    pdf = c / d;
-}
-
-void sampleDistanceByDistSquare<S : ISampleGenerator>(const float dmin, const float dmax, inout S sg, out float d, out float pdf)
-{
-    // avoid dmin == dmax
-    if (dmax - dmin < 1E-5)
-    {
-        d = 0;
-        pdf = 1;
-        return;
-    }
-
-    // sample with CDF
-    float c = dmin * dmax / (dmax - dmin);
-    float x = sampleNext1D(sg);
-    d = sqrt(c / x);
-    pdf = c / (d * d);
-}
-
-void sampleDistanceByDistQuad<S : ISampleGenerator>(const float dmin, const float dmax, inout S sg, out float d, out float pdf)
-{
-    // avoid dmin == dmax
-    if (dmax - dmin < 1E-5)
-    {
-        d = 0;
-        pdf = 1;
-        return;
-    }
-
-    // sample with CDF
-    float dmin3 = pow(dmin, 3);
-    float dmax3 = pow(dmax, 3);
-    float c = 3 * (dmin3 * dmax3) / (dmax3 - dmin3);
-    float x = sampleNext1D(sg);
-    d = sqrt(c / x);
-    pdf = c / pow(d, 4);
-}
-
-uint computeMortonCodeByPos(const float3 pos)
-{
-    //normalize position to [0,1]
-    float3 normPos = (pos - sceneBound.minPoint) / sceneBound.extent();
-    uint3 quantPos = min(max(0, uint3(normPos * quantLevels)), quantLevels - 1);
-    uint mortonCode = interleave_uint3(quantPos);
-    return mortonCode;
-}
-
-void sampleRangeUniformly<S : ISampleGenerator>(const uint2 range, inout S sg, out uint idx, out float pdf)
-{
-    float delta = float(range.y) - float(range.x) + 1;
-    float x = sampleNext1D(sg) * 0.999999f; // FIXME: hack to avoid x == 1
-    idx = floor(range.x + x * delta);
-    pdf = 1.f / delta;
-}
 
 // TODO: merge 3 selectGridByX
 void selectGridByOctree<S : ISampleGenerator>(const ShadingData sd, inout S sg, out UniformGrid chosenGrid, out float chosenGridPdf)
@@ -166,7 +56,7 @@ void selectGridByOctree<S : ISampleGenerator>(const ShadingData sd, inout S sg, 
 
         // recompute BSDF & distance
         float3 bsdf = float3(1,1,1);
-        // float3 bsdf = evalBSDFCosine( sd, normalize(grid.pos - pos));;
+        // float3 bsdf = evalBSDFCosine(sd, normalize(grid.pos - pos));;
 
         // ------------------------ BUG ------------------------ //
         // random choose by weight
@@ -250,6 +140,7 @@ void selectGridByResampling<S : ISampleGenerator>(const ShadingData sd, inout S 
         float3 dir = normalize(grid.pos - pos);
         float distance = length(grid.pos - pos);
         float3 bsdf = evalBSDFCosine(sd, dir);
+        // float3 bsdf = float3(1,1,1);
 
         float gridWeight = length(bsdf * grid.intensity) / (distance * distance) / gridPdf;
         weightSum += gridWeight;
@@ -274,7 +165,7 @@ void chooseTriangle<S : ISampleGenerator>(in uint2 range, in const ShadingData s
     pdf = 0;
     triangleIdx = range.x;
     float3 pos = sd.posW;
-    uint RISCount = 4; // TODO: add to UI
+    uint RISCount = 8; // TODO: add to UI
     for (int i = 0; i < RISCount; i++) // TODO:: make 4 a variable
     {
         uint idx = 0;
@@ -283,8 +174,8 @@ void chooseTriangle<S : ISampleGenerator>(in uint2 range, in const ShadingData s
         idx = floor(range.x + x * delta);
         BVHLeafNode node = gLeafNodes[idx];
         float distance = length(node.debug.xyz - pos);
-        // pHat = length(node.intensity) / distance / distance * delta;
-        pHat = 100.f / distance / distance * delta;
+        pHat = length(node.intensity) / distance / distance * delta;
+        // pHat = 100.f / distance / distance * delta;
         weightSum += pHat;
         if (sampleNext1D(sg) < pHat / weightSum)
         {
@@ -332,7 +223,7 @@ void selectGridAndLight(uint3 dispatchThreadId : SV_DispatchThreadID)
         uint emissiveTriangleIndex = gLeafNodes[leafNodeIdx].triangleIdx;
         float emissivePdf = chosenGridPdf * idxPdf;
 
-        result = float4(emissiveTriangleIndex, emissivePdf, chosenGrid.gridIndex, 1);
+        result = float4(emissiveTriangleIndex, emissivePdf, chosenGridPdf, 1);
     }
 
     gLightIndex[launchIndex] = result;

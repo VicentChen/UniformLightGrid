@@ -1,11 +1,10 @@
 #include "BVHNodeData.slangh"
 #include "GridData.slangh"
 import Scene.ShadingData;
-import Experimental.Scene.Material.MaterialShading;
-import Utils.Math.AABB;
-import Utils.Math.BitTricks;
-import Utils.Sampling.SampleGenerator; // TODO: remove this import
-import ULGStaticParams; // TODO: remove this import
+__exported import Experimental.Scene.Material.MaterialShading;
+__exported import Utils.Sampling.SampleGenerator;
+__exported import MortonCodeHelpers;
+__exported import ULGStaticParams;
 
 StructuredBuffer<BVHLeafNode> gLeafNodes;
 StructuredBuffer<BVHInternalNode> gInternalNodes;
@@ -15,33 +14,9 @@ StructuredBuffer<UniformGrid> gGrids;
 cbuffer PerFrameBVHCB
 {
     uint gridMortonCodePrefixLength;
-    uint quantLevels; // morton code dimension
-    AABB sceneBound;
 }
 
-float3 computePosByMortonCode(uint mortonCode)
-{
-    float3 quantPos = float3(deinterleave_uint3(mortonCode)) / quantLevels;
-    float3 pos = quantPos * sceneBound.extent() + sceneBound.minPoint;
-    return pos;
-}
-
-float3 computePosByMortonCode(uint mortonCode, uint prefixLength)
-{
-    uint maskMin = 0xFFFFFFFF << (30 - prefixLength);
-    uint mortonCodeMin = mortonCode & (maskMin);
-    uint maskMax = 1 << (30 - prefixLength);
-    uint mortonCodeMax = mortonCode | (maskMax - 1);
-
-    float3 quantPosMin = float3(deinterleave_uint3(mortonCodeMin)) / quantLevels;
-    float3 quantPosMax = float3(deinterleave_uint3(mortonCodeMax)) / quantLevels;
-
-    float3 minPos = quantPosMin * sceneBound.extent() + sceneBound.minPoint;
-    float3 maxPos = quantPosMax * sceneBound.extent() + sceneBound.minPoint;
-
-    return (minPos + maxPos) * 0.5f;
-}
-
+// This function uses SampleGenerator so we place it here.
 float3 computeRandomPosByMortonCode<S : ISampleGenerator>(uint mortonCode, uint prefixLength, S sg)
 {
     uint maskMin = 0xFFFFFFFF << (30 - prefixLength);
@@ -58,7 +33,6 @@ float3 computeRandomPosByMortonCode<S : ISampleGenerator>(uint mortonCode, uint 
     float3 random = sampleNext3D(sg);
     return minPos * random + maxPos * (float3(1.0f) - random);
 }
-
 
 UniformGrid traverseTreeForGird<S : ISampleGenerator>(const ShadingData sd, float3 dir, out float pdf, inout S sg)
 {
@@ -108,6 +82,7 @@ UniformGrid traverseTreeForGird<S : ISampleGenerator>(const ShadingData sd, floa
         {
             rChildIntensity = gGrids[rChild].intensity;
             rChildPos = computePosByMortonCode(gGrids[rChild].mortonCode, gridMortonCodePrefixLength);
+            // rChildPos = computeRandomPosByMortonCode(gGrids[rChild].mortonCode, gridMortonCodePrefixLength, sg);
             rChildDir = normalize(lChildPos - pos);
             rChildDis = length(lChildPos - pos);
         }
@@ -186,17 +161,6 @@ UniformGrid traverseTreeForGird<S : ISampleGenerator>(const ShadingData sd, floa
     return grid;
 }
 
-/** Choose a light from BVH
-    \param[in] staring node for traversal
-    \return a triangle index in subtree
-*/
-uint traverseTreeForLight(uint root)
-{
-    // TODO: we implemented it in SelectGridAndLight.cs.slang > chooseTriangle
-    return 0;
-}
-
-
 // ---------------- Octree Code ----------------- //
 // TODO: find a better place
 
@@ -208,12 +172,6 @@ cbuffer PerFrameOctreeCB
 	uint octreeRootIndex;
 }
 
-bool checkPrefix(uint mortonCode1, uint mortonCode2, uint prefixLength)
-{
-    uint mask = 0xFFFFFFFF << (30 - prefixLength);
-    return (mortonCode1 & mask) == (mortonCode2 & mask);
-}
-
 void buildGridByGridNode(in OctreeNode octreeNode, out UniformGrid grid)
 {
     grid.pos = octreeNode.pos;
@@ -223,30 +181,13 @@ void buildGridByGridNode(in OctreeNode octreeNode, out UniformGrid grid)
     grid.isLeafNode = true;
 }
 
-// TODO: remove duplicate code with computeBoundByMortonCode
-AABB computeAABBByMortonCode(uint mortonCode, uint prefixLength)
-{
-    uint maskMin = 0xFFFFFFFF << (30 - prefixLength);
-    uint mortonCodeMin = mortonCode & (maskMin);
-    uint maskMax = 1 << (30 - prefixLength);
-    uint mortonCodeMax = mortonCode | (maskMax - 1);
-
-    float3 quantPosMin = float3(deinterleave_uint3(mortonCodeMin)) / quantLevels;
-    float3 quantPosMax = float3(deinterleave_uint3(mortonCodeMax)) / quantLevels;
-
-    float3 minPos = quantPosMin * sceneBound.extent() + sceneBound.minPoint;
-    float3 maxPos = quantPosMax * sceneBound.extent() + sceneBound.minPoint;
-
-    AABB aabb;
-    aabb.minPoint = minPos;
-    aabb.maxPoint = maxPos;
-    return aabb;
-}
-
 /** Compute the near and far intersections of the cube (stored in the x and y components) using the slab method.
     No intersection means vec.x > vec.y (really tNear > tFar).
     https://gist.github.com/DomNomNom/46bb1ce47f68d255fd5d
-    TODO: combine duplicate code in SelectGridAndLight.cs.slang
+    \param rayOrigin
+    \param rayDir
+    \param aabb
+    \return A float2 with (tNear, tFar)
 */
 float2 intersectWithBound(const float3 rayOrigin, const float3 rayDir, const AABB aabb)
 {
@@ -302,8 +243,6 @@ UniformGrid traverseOctree<S : ISampleGenerator>(const ShadingData sd, out float
         {
             OctreeNode child = gOctree[i];
 
-            // float childDistance = max(distance(child.pos, sd.posW), 0.0001f);
-            // float childWeight = length(child.intensity) / childDistance / childDistance;
             float childWeight = computeOctreeNodeWeight(sd, child);
             
             weightSum += childWeight;
@@ -336,8 +275,8 @@ UniformGrid traverseOctree<S : ISampleGenerator>(const ShadingData sd, float3 di
     UniformGrid grid = {};
     pdf = 1.f;
 
-
     uint currNodeIdx = octreeRootIndex;
+    int currLevel = 1;
     while (true)
     {
         OctreeNode currNode = gOctree[currNodeIdx];
@@ -351,10 +290,10 @@ UniformGrid traverseOctree<S : ISampleGenerator>(const ShadingData sd, float3 di
         uint nextNodeIdx = currNodeIdx; // next child grid to traverse
         float nextNodePdf = 0.00001f;
         float weightSum = 0.00001f;
-        int   candidateCount = 0;
         for (int i = currNode.childRange.x; i <= currNode.childRange.y; i++)
         {
             OctreeNode child = gOctree[i];
+
             AABB childBound = computeAABBByMortonCode(child.mortonCode, child.prefixLength);
             float2 intersectT = intersectWithBound(sd.posW, dir, childBound);
 
@@ -369,9 +308,8 @@ UniformGrid traverseOctree<S : ISampleGenerator>(const ShadingData sd, float3 di
             {
                 childWeight = length(bsdf * child.intensity) / childDistance / childDistance;
                 // childWeight = length(child.intensity) / childDistance / childDistance;
-                candidateCount++;
             }
-
+            
             weightSum += childWeight;
             if (sampleNext1D(sg) < childWeight / weightSum)
             {
@@ -391,6 +329,7 @@ UniformGrid traverseOctree<S : ISampleGenerator>(const ShadingData sd, float3 di
         {
             pdf *= nextNodePdf;
             currNodeIdx = nextNodeIdx;
+            currLevel++;
         }
     }
 
@@ -416,7 +355,7 @@ UniformGrid findContainingGird(uint mortonCode)
         for (int i = currNode.childRange.x; i <= currNode.childRange.y; i++)
         {
             OctreeNode child = gOctree[i];
-            if (checkPrefix(child.mortonCode, mortonCode, child.prefixLength))
+            if (hasSamePrefix(child.mortonCode, mortonCode, child.prefixLength))
             {
                 nextNodeIdx = i;
                 break;
@@ -435,3 +374,71 @@ UniformGrid findContainingGird(uint mortonCode)
 
     return grid;
 }
+
+// =========== Backup Codes =========== //
+
+// UniformGrid traverseOctree<S : ISampleGenerator>(const ShadingData sd, float3 dir, out float pdf, inout S sg)
+// {
+//     UniformGrid grid = {};
+//     pdf = 1.f;
+
+
+//     uint currNodeIdx = octreeRootIndex;
+//     while (true)
+//     {
+//         OctreeNode currNode = gOctree[currNodeIdx];
+
+//         if (currNode.isLeaf)
+//         {
+//             buildGridByGridNode(currNode, grid);
+//             break;
+//         }
+
+//         uint nextNodeIdx = currNodeIdx; // next child grid to traverse
+//         float nextNodePdf = 0.00001f;
+//         float weightSum = 0.00001f;
+//         for (int i = currNode.childRange.x; i <= currNode.childRange.y; i++)
+//         {
+//             OctreeNode child = gOctree[i];
+//             AABB childBound = computeAABBByMortonCode(child.mortonCode, child.prefixLength);
+//             float2 intersectT = intersectWithBound(sd.posW, dir, childBound);
+
+//             float childWeight = 0.f;
+//             float3 intersectPoint = sd.posW + dir * (intersectT.x + intersectT.y) * 0.5f;
+//             // Strategy 1: compute distance to intersection point
+//             float childDistance = max(distance(child.pos, intersectPoint), 0.0001f);
+//             // Strategy 2: compute distance to shading point
+//             // float childDistance = max(distance(child.pos, sd.posW), 0.0001f);
+//             float3 bsdf = evalBSDFCosine(sd, normalize(grid.pos-sd.posW));
+//             // bsdf = (evalBSDFCosine(sd, childBound.maxPoint) + bsdf) * 0.5;
+//             if (intersectT.x <= intersectT.y) // if intersect
+//             {
+//                 // childWeight = length(bsdf * child.intensity) / childDistance / childDistance;
+//                 childWeight = length(child.intensity) / childDistance / childDistance;
+//                 // childWeight = length(child.intensity) * pow(dot(dir, normalize(child.pos-sd.posW)), 1);
+//             }
+
+//             weightSum += childWeight;
+//             if (sampleNext1D(sg) < childWeight / weightSum)
+//             {
+//                 nextNodeIdx = i;
+//                 nextNodePdf = childWeight;
+//             }
+//         }
+//         nextNodePdf = nextNodePdf / weightSum;
+
+//         // can't find a child to traverse
+//         if (nextNodeIdx == currNodeIdx)
+//         {
+//             buildGridByGridNode(currNode, grid);
+//             break;
+//         }
+//         else
+//         {
+//             pdf *= nextNodePdf;
+//             currNodeIdx = nextNodeIdx;
+//         }
+//     }
+
+//     return grid;
+// }

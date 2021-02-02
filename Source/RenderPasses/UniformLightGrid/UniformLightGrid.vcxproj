@@ -43,6 +43,8 @@
     <ShaderSource Include="EmissiveULGSampler.slang" />
     <ShaderSource Include="GenBVHLeafNodes.cs.slang" />
     <ShaderSource Include="GridData.slangh" />
+    <ShaderSource Include="MortonCodeHelpers.slang" />
+    <ShaderSource Include="Samplers.slang" />
     <ShaderSource Include="SelectGridAndLight.cs.slang" />
     <ShaderSource Include="TraverseBVH.slang" />
     <ShaderSource Include="ULGStaticParams.slang" />

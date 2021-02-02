@@ -1,8 +1,7 @@
 #include "BVHNodeData.slangh"
 import Scene.Scene;
 import Experimental.Scene.Lights.LightCollection;
-import Utils.Math.AABB;
-import Utils.Math.BitTricks;
+import MortonCodeHelpers;
 
 #ifndef GROUP_SIZE
     // Compile-time error if GROUP_SIZE is not defined.
@@ -12,8 +11,6 @@ import Utils.Math.BitTricks;
 cbuffer PerFrameCB
 {
     uint emissiveTriangleCount;
-    uint quantLevels; // morton code dimension
-    AABB sceneBound; // reference: LightBVHRefits.cs.slang
 }
 
 RWStructuredBuffer<BVHLeafNode> gLeafNodes;
@@ -32,10 +29,7 @@ void genBVHLeafNodes(uint3 dispatchThreadId : SV_DispatchThreadID)
     float3 emissive = gScene.getEmissive(tri.materialID, uv, gScene.materialResources[tri.materialID]);
     float area = tri.area;
 
-    //normalize position to [0,1]
-    float3 normPos = (triangleCenter - sceneBound.minPoint) / sceneBound.extent();
-    uint3 quantPos = min(max(0, uint3(normPos * quantLevels)), quantLevels - 1);
-    uint mortonCode = interleave_uint3(quantPos);
+    uint mortonCode = computeMortonCodeByPos(triangleCenter);
 
     BVHLeafNode node = {};
     node.mortonCode = mortonCode;

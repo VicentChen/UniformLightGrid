@@ -9,16 +9,58 @@
     <ClInclude Include="UniformLightGridCommon.h" />
   </ItemGroup>
   <ItemGroup>
-    <ShaderSource Include="BVHNodeData.slangh" />
-    <ShaderSource Include="EmissiveULGSampler.slang" />
-    <ShaderSource Include="ULGTracer.rt.slang" />
-    <ShaderSource Include="ULGTracer.slang" />
-    <ShaderSource Include="ULGTracerHelpers.slang" />
-    <ShaderSource Include="ConstructBVH.cs.slang" />
-    <ShaderSource Include="GenBVHLeafNodes.cs.slang" />
-    <ShaderSource Include="GridData.slangh" />
-    <ShaderSource Include="SelectGridAndLight.cs.slang" />
-    <ShaderSource Include="TraverseBVH.slang" />
-    <ShaderSource Include="ULGStaticParams.slang" />
+    <ShaderSource Include="ULGTracer.rt.slang">
+      <Filter>PathTracers</Filter>
+    </ShaderSource>
+    <ShaderSource Include="ULGTracer.slang">
+      <Filter>PathTracers</Filter>
+    </ShaderSource>
+    <ShaderSource Include="ULGTracerHelpers.slang">
+      <Filter>PathTracers</Filter>
+    </ShaderSource>
+    <ShaderSource Include="BVHNodeData.slangh">
+      <Filter>ULGData</Filter>
+    </ShaderSource>
+    <ShaderSource Include="GridData.slangh">
+      <Filter>ULGData</Filter>
+    </ShaderSource>
+    <ShaderSource Include="Samplers.slang">
+      <Filter>Utils</Filter>
+    </ShaderSource>
+    <ShaderSource Include="MortonCodeHelpers.slang">
+      <Filter>Utils</Filter>
+    </ShaderSource>
+    <ShaderSource Include="EmissiveULGSampler.slang">
+      <Filter>PathTracers</Filter>
+    </ShaderSource>
+    <ShaderSource Include="TraverseBVH.slang">
+      <Filter>ULG</Filter>
+    </ShaderSource>
+    <ShaderSource Include="SelectGridAndLight.cs.slang">
+      <Filter>ULG</Filter>
+    </ShaderSource>
+    <ShaderSource Include="GenBVHLeafNodes.cs.slang">
+      <Filter>ULG</Filter>
+    </ShaderSource>
+    <ShaderSource Include="ConstructBVH.cs.slang">
+      <Filter>ULG</Filter>
+    </ShaderSource>
+    <ShaderSource Include="ULGStaticParams.slang">
+      <Filter>ULG</Filter>
+    </ShaderSource>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="PathTracers">
+      <UniqueIdentifier>{844b71c2-8cfb-4037-98fa-96e92c7f440c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ULGData">
+      <UniqueIdentifier>{8e82a198-d60f-4e4e-a428-f75417f7fd60}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Utils">
+      <UniqueIdentifier>{8e6a0cde-b75d-4560-8d11-821981a4f23d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ULG">
+      <UniqueIdentifier>{b1fc21c3-26ea-4e5b-a632-d5d0b25cf3be}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
 </Project>

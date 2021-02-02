@@ -149,9 +149,9 @@ void UniformLightGrid::generateBVHLeafNodes(RenderContext* pRenderContext)
     mpLeafNodeGenerator.getRootVar()["gScene"] = mpScene->getParameterBlock();
     auto var = mpLeafNodeGenerator->getRootVar()["PerFrameCB"];
     var["emissiveTriangleCount"] = emissiveTriangleCount;
-    var["quantLevels"] = kQuantLevels;
-    var["sceneBound"]["minPoint"] = sceneBound.minPoint;
-    var["sceneBound"]["maxPoint"] = sceneBound.maxPoint;
+    mpLeafNodeGenerator->getRootVar()["PerFrameMortonCodeCB"]["quantLevels"] = kQuantLevels;
+    mpLeafNodeGenerator->getRootVar()["PerFrameMortonCodeCB"]["sceneBound"]["minPoint"] = sceneBound.minPoint;
+    mpLeafNodeGenerator->getRootVar()["PerFrameMortonCodeCB"]["sceneBound"]["maxPoint"] = sceneBound.maxPoint;
     mpLeafNodeGenerator->getRootVar()["gLeafNodes"] = mpBVHLeafNodesBuffer;
 
     mpLeafNodeGenerator->execute(pRenderContext, emissiveTriangleCount, 1, 1);
@@ -202,6 +202,7 @@ void UniformLightGrid::constructBVHTree(RenderContext* pRenderContext)
 
 void UniformLightGrid::generateUniformGrids(RenderContext* pRenderContext)
 {
+    // TODO: visualize uniform grids
     assert(mLeafNodes.size() > 0);
 
     PROFILE("ULG_generateUniformGrids");
@@ -374,9 +375,9 @@ void UniformLightGrid::chooseGridsAndLights(RenderContext* pRenderContext, const
     var["realSceneBound"]["maxPoint"] = realSceneBound.maxPoint;
     var["gridCount"] = mGrids.size();
     mpGridAndLightSelector.getRootVar()["PerFrameBVHCB"]["gridMortonCodePrefixLength"] = mGridAndLightSelectorParams.gridMortonCodePrefixLength;
-    mpGridAndLightSelector.getRootVar()["PerFrameBVHCB"]["quantLevels"] = kQuantLevels;
-    mpGridAndLightSelector.getRootVar()["PerFrameBVHCB"]["sceneBound"]["minPoint"] = sceneBound.minPoint;
-    mpGridAndLightSelector.getRootVar()["PerFrameBVHCB"]["sceneBound"]["maxPoint"] = sceneBound.maxPoint;
+    mpGridAndLightSelector.getRootVar()["PerFrameMortonCodeCB"]["quantLevels"] = kQuantLevels;
+    mpGridAndLightSelector.getRootVar()["PerFrameMortonCodeCB"]["sceneBound"]["minPoint"] = sceneBound.minPoint;
+    mpGridAndLightSelector.getRootVar()["PerFrameMortonCodeCB"]["sceneBound"]["maxPoint"] = sceneBound.maxPoint;
 
     mpGridAndLightSelector->execute(pRenderContext, uint3(mSharedParams.frameDim, 1));
 }
