@@ -113,8 +113,9 @@ AABB UniformLightGrid::sceneBoundHelper()
     const auto& sceneBound = mpScene->getSceneBounds();
     AABB hackedSceneBound = sceneBound;
     auto extent = hackedSceneBound.extent();
+    auto center = hackedSceneBound.center();
     float maxExtent = std::max(extent.x, std::max(extent.y, extent.z));
-    hackedSceneBound.maxPoint = hackedSceneBound.maxPoint + float3(maxExtent, maxExtent, maxExtent);
+    hackedSceneBound.maxPoint = hackedSceneBound.minPoint + float3(maxExtent, maxExtent, maxExtent);
     return hackedSceneBound;
 }
 
@@ -273,7 +274,6 @@ void UniformLightGrid::chooseGridsAndLights(RenderContext* pRenderContext, const
     // TODO: do we have better way to get scene bound?
     // for grid selection, we need real scene bound and uniform scene bound here
     auto sceneBound = sceneBoundHelper();
-    auto realSceneBound = mpScene->getSceneBounds();
 
     // Add missed channels here
     // Bind I/O buffers. These needs to be done per-frame as the buffers may change anytime.
@@ -301,9 +301,6 @@ void UniformLightGrid::chooseGridsAndLights(RenderContext* pRenderContext, const
     var["frameCount"] = mSharedParams.frameCount;
     var["minDistance"] = mGridAndLightSelectorParams.minDistanceOfGirdSelection;
     var["samplesPerDirection"] = mGridAndLightSelectorParams.samplesPerDirection;
-    // TODO: function to bind AABB
-    var["realSceneBound"]["minPoint"] = realSceneBound.minPoint;
-    var["realSceneBound"]["maxPoint"] = realSceneBound.maxPoint;
     var["gridCount"] = mGrids.size();
     mpGridAndLightSelector.getRootVar()["PerFrameBVHCB"]["gridMortonCodePrefixLength"] = mGridAndLightSelectorParams.gridMortonCodePrefixLength;
     mpGridAndLightSelector.getRootVar()["PerFrameMortonCodeCB"]["quantLevels"] = kQuantLevels;
@@ -406,6 +403,8 @@ void UniformLightGrid::execute(RenderContext* pRenderContext, const RenderData& 
         mpScene->raytrace(pRenderContext, mULGTracer.pProgram.get(), mULGTracer.pVars, uint3(targetDim, 1));
     }
 
+    if (mVisualizeOctree) mOctree.visualize(pRenderContext, mpScene, renderData);
+
     // Call shared post-render code.
     endFrame(pRenderContext, renderData);
 }
@@ -413,6 +412,9 @@ void UniformLightGrid::execute(RenderContext* pRenderContext, const RenderData& 
 void UniformLightGrid::renderUI(Gui::Widgets& widget)
 {
     widget.var("output color amplifer", mAmplifyCofficient, 1.0f, 100.0f, 1.0f);
+
+    widget.checkbox("visualize octree", mVisualizeOctree);
+    if (mVisualizeOctree) mOctree.renderUI(widget);
 
     {
         // we can't add define for compute pass, so we regenerate it every time defines change

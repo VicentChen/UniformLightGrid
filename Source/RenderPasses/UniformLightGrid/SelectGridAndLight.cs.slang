@@ -18,8 +18,6 @@ cbuffer PerFrameCB
     // TODO: rename this for restir
     uint samplesPerDirection;
 
-    AABB realSceneBound;
-
     uint gridCount; // TODO: better position?
 }
 
@@ -307,60 +305,3 @@ void selectGridAndLight(uint3 dispatchThreadId : SV_DispatchThreadID)
 //     return range.x;
 // }
 
-// void selectGridByResampling<S : ISampleGenerator>(const ShadingData sd, inout S sg, out UniformGrid chosenGrid, out float chosenGridPdf)
-// {
-//     float3 pos = sd.posW;
-
-//     float3 extent = float3(300,300,300);
-
-//     float3 minPos = pos - extent;
-//     float3 maxPos = pos - extent;
-
-
-//     // float3 normMinPos = (minPos - realSceneBound.minPoint) / realSceneBound.extent();
-//     // uint3 quantMinPos = min(max(0, uint3(normMinPos * quantLevels)), quantLevels - 1);
-//     // uint mortonCodeMin = interleave_uint3(quantMinPos);
-
-//     // float3 normMaxPos = (maxPos - realSceneBound.minPoint) / realSceneBound.extent();
-//     // uint3 quantMaxPos = min(max(0, uint3(normMaxPos * quantLevels)), quantLevels - 1);
-//     // uint mortonCodeMax = interleave_uint3(quantMaxPos);
-
-//     uint2 range = uint2(0,0);
-//     // range.x = search(mortonCodeMin);
-//     // range.y = search(mortonCodeMax);
-//     range.x = floor(sampleNext1D(sg) * 0.999999f * gridCount);
-//     range.y = floor(sampleNext1D(sg) * 0.999999f * gridCount);
-//     if (range.x > range.y)
-//     {
-//         uint temp = range.x;
-//         range.x = range.y;
-//         range.y = temp;
-//     }
-//     if (range.x == range.y) range = uint2(0, gridCount - 1);
-//     uint rangeLength = range.y - range.x + 1;
-//     float gridPdf = 1.f / rangeLength;
-
-//     float weightSum = 1e-10;
-//     float3 chosenGridBSDF = 0;
-//     float  chosenGridDistance = 0;
-//     for (int i = 0; i < samplesPerDirection; i++)
-//     {
-//         uint gridIdx = uint(floor(sampleNext1D(sg) * 0.999999f * rangeLength)) + range.x;
-//         UniformGrid grid = gGrids[gridIdx];
-//         float3 dir = normalize(grid.pos - pos);
-//         float distance = length(grid.pos - pos);
-//         float3 bsdf = evalBSDFCosine(sd, dir);
-
-//         float gridWeight = length(bsdf * grid.intensity) / (distance * distance) / gridPdf;
-//         weightSum += gridWeight;
-//         if (sampleNext1D(sg) < gridWeight / weightSum)
-//         {
-//             chosenGrid = grid;
-//             chosenGridBSDF = bsdf;
-//             chosenGridDistance = distance;
-//         }
-//     }
-
-//     float chosenGridWeight = length(chosenGridBSDF * chosenGrid.intensity) / max((chosenGridDistance * chosenGridDistance), 0.0001f);
-//     chosenGridPdf = chosenGridWeight * samplesPerDirection / max(weightSum, 0.0001f);
-// }

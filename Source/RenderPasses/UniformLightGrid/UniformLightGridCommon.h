@@ -22,6 +22,26 @@ inline uint3 deinterleave_uint3(uint x)
     return v;
 }
 
+inline float3 computePosByMortonCode(const uint mortonCode, const float quantLevels, const AABB& sceneBound)
+{
+    float3 quantPos = float3(deinterleave_uint3(mortonCode)) / quantLevels;
+    float3 pos = quantPos * sceneBound.extent() + sceneBound.minPoint;
+    return pos;
+}
+
+inline AABB computeAABBByMortonCode(const uint mortonCode, const uint prefixLength, const float quantLevels, const AABB& sceneBound)
+{
+    uint maskMin = 0xFFFFFFFF << (30 - prefixLength);
+    uint mortonCodeMin = mortonCode & (maskMin);
+    uint maskMax = 1 << (30 - prefixLength);
+    uint mortonCodeMax = mortonCode | (maskMax - 1);
+
+    float3 minPos = computePosByMortonCode(mortonCodeMin, quantLevels, sceneBound);
+    float3 maxPos = computePosByMortonCode(mortonCodeMax, quantLevels, sceneBound);
+
+    return AABB(minPos, maxPos);
+}
+
 inline float3 computePosByMortonCode(const uint mortonCode, const uint prefixLength, const float quantLevels, const AABB& sceneBound)
 {
     uint maskMin = 0xFFFFFFFF << (30 - prefixLength);
@@ -29,11 +49,8 @@ inline float3 computePosByMortonCode(const uint mortonCode, const uint prefixLen
     uint maskMax = 1 << (30 - prefixLength);
     uint mortonCodeMax = mortonCode | (maskMax - 1);
 
-    float3 quantPosMin = float3(deinterleave_uint3(mortonCodeMin)) / quantLevels;
-    float3 quantPosMax = float3(deinterleave_uint3(mortonCodeMax)) / quantLevels;
-
-    float3 minPos = quantPosMin * sceneBound.extent() + sceneBound.minPoint;
-    float3 maxPos = quantPosMax * sceneBound.extent() + sceneBound.minPoint;
+    float3 minPos = computePosByMortonCode(mortonCodeMin, quantLevels, sceneBound);
+    float3 maxPos = computePosByMortonCode(mortonCodeMax, quantLevels, sceneBound);
 
     return (minPos + maxPos) * 0.5f;
 }

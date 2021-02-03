@@ -211,7 +211,7 @@ float computeOctreeNodeWeight(const ShadingData sd, const OctreeNode node)
     }
     else if (kTreeTraverseWeightType == (uint)TreeTraverseWeightType::DirectionDistanceIntensity)
     {
-        weight = 100 * length(node.intensity) / distance / distance; //pow(length(node.intensity), 4) / distance / distance;
+        weight = pow(length(node.intensity), 4) / distance / distance;
     }
     else if (kTreeTraverseWeightType == (uint)TreeTraverseWeightType::BRDFShading)
     {

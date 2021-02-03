@@ -129,4 +129,5 @@ private:
     // TODO: add a struct for ULG parameters
     // hack output color
     float mAmplifyCofficient = 1.0f;
+    bool mVisualizeOctree = false;
 };
