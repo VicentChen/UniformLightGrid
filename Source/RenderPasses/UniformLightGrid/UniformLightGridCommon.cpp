@@ -14,6 +14,7 @@ void createAndCopyBuffer(RenderContext* pRenderContext, Buffer::SharedPtr& pBuff
         pStagingBuffer->setName(stagingBufferName);
     }
 
+    // TODO: use setBlob
     // copy grid data to gpu
     size_t bufferSize = elementCount * elementSize;
     void* pGpuData = pStagingBuffer->map(Buffer::MapType::Write);

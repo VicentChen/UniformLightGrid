@@ -59,6 +59,13 @@ public:
     static const char* sDesc;
 
 private:
+    struct AliasTable
+    {
+        float weightSum;                ///< Total weight of all elements used to create the alias table
+        uint32_t N;                     ///< Number of entries in the alias table (and # elements in the buffers)
+        Buffer::SharedPtr fullTable;    ///< A compressed/packed merged table.  Max 2^24 (16 million) entries per table.
+    };
+
     UniformLightGrid(const Dictionary& dict);
 
     AABB sceneBoundHelper();
@@ -66,6 +73,10 @@ private:
     void generateBVHLeafNodes(RenderContext* pRenderContext);
     void sortLeafNodes(RenderContext* pRenderContext);
     void constructBVHTree(RenderContext* pRenderContext);
+
+    void genPowerNode(RenderContext* pRenderContext);
+    void genPowerGrid(RenderContext* pRenderContext);
+    AliasTable genAliasTable(std::vector<float> wieght);
 
     void generateUniformGrids(RenderContext* pRenderContext);
     void generateOctree(RenderContext* pRenderContext);
@@ -112,6 +123,16 @@ private:
 
     // octree data
     Octree mOctree;
+
+    // power sampler
+    std::vector<BVHPowerNode> mPowerNodes;
+    Buffer::SharedPtr mpPowerLeafNodesBuffer;
+
+    std::vector<UniformGrid> mPowerGrids;
+    Buffer::SharedPtr mpPowerGridDataBuffer;
+
+    std::mt19937 mAliasTableRng;
+    AliasTable mTriangleTable;
 
     // grid and light selection data
     struct

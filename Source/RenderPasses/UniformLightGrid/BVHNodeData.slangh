@@ -44,4 +44,12 @@ struct BVHLeafNode
     float4 debug = float4(0, 0, 0, 0);
 };
 
+struct BVHPowerNode
+{
+    uint mortonCode = 0;
+    uint triangleIdx = 0;
+    float flux = 0;
+    float3 intensity = float3(0, 0, 0);
+};
+
 END_NAMESPACE_FALCOR
