@@ -18,13 +18,15 @@ struct UniformGrid
 
 struct OctreeNode
 {
+    uint nodeIdx = 0;
+    bool isLeaf = false;
     float3 pos = float3(0, 0, 0);
     float3 intensity = float3(0, 0, 0);
     uint  mortonCode = 0;
     uint  prefixLength = 0;
     uint2 childRange = uint2(0, 0);
+    uint2 leafRange = uint2(0, 0);
     uint2 triangleRange = uint2(0, 0);
-    bool  isLeaf = false;
     // above attributes use 13 * 4 bytes, add 3 * 4 bytes padding
     float3 paddingAndDebug = float3(0, 0, 0);
 };

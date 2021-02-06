@@ -73,4 +73,4 @@ inline float3 computePosByMortonCode(const uint mortonCode, const uint prefixLen
     return (minPos + maxPos) * 0.5f;
 }
 
-void createAndCopyBuffer(RenderContext* pRenderContext, Buffer::SharedPtr& pBuffer, Buffer::SharedPtr& pStagingBuffer, uint elementSize, uint elementCount, void* pCpuData, const std::string& bufferName, const std::string& stagingBufferName);
+void createAndCopyBuffer(Buffer::SharedPtr& pBuffer, uint elementSize, uint elementCount, const void* pCpuData, const std::string& bufferName);

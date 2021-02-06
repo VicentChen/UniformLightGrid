@@ -23,6 +23,7 @@ def render_graph_PathTracerGraph():
     loadRenderPassLibrary('SceneDebugger.dll')
     loadRenderPassLibrary('SkyBox.dll')
     loadRenderPassLibrary('SSAO.dll')
+    loadRenderPassLibrary('SSAOMap.dll')
     loadRenderPassLibrary('TemporalDelayPass.dll')
     loadRenderPassLibrary('ToneMapper.dll')
     loadRenderPassLibrary('UniformLightGrid.dll')
@@ -38,6 +39,8 @@ def render_graph_PathTracerGraph():
     g.addPass(SVGFPass, 'SVGFPass')
     GBufferRasterWithView = createPass('GBufferRasterWithView', {'samplePattern': SamplePattern.Center, 'sampleCount': 16, 'disableAlphaTest': False, 'adjustShadingNormals': True, 'forceCullMode': False, 'cull': CullMode.CullBack})
     g.addPass(GBufferRasterWithView, 'GBufferRasterWithView')
+    SSAOMap = createPass('SSAOMap', {'aoMapSize': uint2(1024,1024), 'kernelSize': 16, 'noiseSize': uint2(16,16), 'radius': 0.10000000149011612, 'distribution': SSAOMapSampleDistribution.CosineHammersley, 'blurWidth': 5, 'blurSigma': 2.0})
+    g.addPass(SSAOMap, 'SSAOMap')
     g.addEdge('AccumulatePass.output', 'ToneMappingPass.src')
     g.addEdge('UniformLightGrid.color', 'SVGFPass.Color')
     g.addEdge('UniformLightGrid.albedo', 'SVGFPass.Albedo')
@@ -58,6 +61,9 @@ def render_graph_PathTracerGraph():
     g.addEdge('GBufferRasterWithView.pnFwidth', 'SVGFPass.PositionNormalFwidth')
     g.addEdge('GBufferRasterWithView.linearZ', 'SVGFPass.LinearZ')
     g.addEdge('GBufferRasterWithView.mvec', 'SVGFPass.MotionVec')
+    g.addEdge('GBufferRasterWithView.depth', 'SSAOMap.depth')
+    g.addEdge('GBufferRasterWithView.normW', 'SSAOMap.normals')
+    g.addEdge('SSAOMap.AOMapOut', 'UniformLightGrid.AoMap')
     g.markOutput('ToneMappingPass.dst')
     return g
 

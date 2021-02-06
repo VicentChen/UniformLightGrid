@@ -54,6 +54,9 @@ namespace
     const uint32_t kMaxAttributesSizeBytes = 8;
     const uint32_t kMaxRecursionDepth = 1;
 
+    // Render pass input channels.
+    const std::string kAOInput = "AoMap";
+
     // Render pass internal channels.
     const std::string kLightIndexInternal = "lightIndex";
 
@@ -61,6 +64,11 @@ namespace
     const std::string kColorOutput = "color";
     const std::string kAlbedoOutput = "albedo";
     const std::string kTimeOutput = "time";
+
+    const ChannelList kInputChannels =
+    {
+        { kAOInput,         "gAOMap",                     "AO Map", true /* optional */                                             },
+    };
 
     const ChannelList kOutputChannels =
     {
@@ -138,9 +146,6 @@ void UniformLightGrid::generateBVHLeafNodes(RenderContext* pRenderContext)
     {
         mpBVHLeafNodesBuffer = Buffer::createStructured(mpLeafNodeGenerator->getRootVar()["gLeafNodes"], emissiveTriangleCount, Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false);
         mpBVHLeafNodesBuffer->setName("ULG::mpBVHLeafNodesBuffer");
-
-        mpBVHLeafNodesStagingBuffer = Buffer::createStructured(mpLeafNodeGenerator->getRootVar()["gLeafNodes"], emissiveTriangleCount, Resource::BindFlags::None, Buffer::CpuAccess::Write);
-        mpBVHLeafNodesStagingBuffer->setName("ULG::mpBVHLeafNodesStagingBuffer");
     }
 
     // TODO: do we have better way to get scene bound?
@@ -172,11 +177,7 @@ void UniformLightGrid::sortLeafNodes(RenderContext* pRenderContext)
 
     std::sort(mLeafNodes.begin(), mLeafNodes.end(), [](const BVHLeafNode& a, const BVHLeafNode& b) { return a.mortonCode < b.mortonCode; });
 
-     pLeaves = (BVHLeafNode*)mpBVHLeafNodesStagingBuffer->map(Buffer::MapType::Write);
-    memcpy(pLeaves, mLeafNodes.data(), bufferSize);
-    mpBVHLeafNodesStagingBuffer->unmap();
-
-    pRenderContext->copyBufferRegion(mpBVHLeafNodesBuffer.get(), 0, mpBVHLeafNodesStagingBuffer.get(), 0, bufferSize);
+    mpBVHLeafNodesBuffer->setBlob(mLeafNodes.data(), 0, bufferSize);
 }
 
 void UniformLightGrid::constructBVHTree(RenderContext* pRenderContext)
@@ -379,7 +380,6 @@ UniformLightGrid::AliasTable UniformLightGrid::genAliasTable(std::vector<float> 
     return result;
 }
 
-
 void UniformLightGrid::generateUniformGrids(RenderContext* pRenderContext)
 {
     // TODO: visualize uniform grids
@@ -416,7 +416,7 @@ void UniformLightGrid::generateUniformGrids(RenderContext* pRenderContext)
         mGrids.emplace_back(grid);
     }
 
-    createAndCopyBuffer(pRenderContext, mpGridDataBuffer, mpGridDataStagingBuffer, sizeof(UniformGrid), (uint)mGrids.size(), mGrids.data(), "ULG::mpGridDataBuffer", "ULG::mpGridDataBufferHelper");
+    createAndCopyBuffer(mpGridDataBuffer, sizeof(UniformGrid), (uint)mGrids.size(), mGrids.data(), "ULG::mpGridDataBuffer");
 }
 
 void UniformLightGrid::generateOctree(RenderContext* pRenderContext)
@@ -449,6 +449,7 @@ void UniformLightGrid::chooseGridsAndLights(RenderContext* pRenderContext, const
     }
 
     Texture::SharedPtr pLightIndexTexture = renderData[kLightIndexInternal]->asTexture();
+    Texture::SharedPtr pAOMap = renderData[kAOInput]->asTexture();
 
     // TODO: do we have better way to get scene bound?
     // for grid selection, we need real scene bound and uniform scene bound here
@@ -466,6 +467,7 @@ void UniformLightGrid::chooseGridsAndLights(RenderContext* pRenderContext, const
     };
     for (auto channel : mInputChannels) bind(channel);
 
+    mpGridAndLightSelector.getRootVar()["gAOMap"] = pAOMap;
     mpGridAndLightSelector.getRootVar()["gLightIndex"] = pLightIndexTexture;
     mpGridAndLightSelector.getRootVar()["gScene"] = mpScene->getParameterBlock();
     mpGridAndLightSelector.getRootVar()["gLeafNodes"] = mpBVHLeafNodesBuffer;
@@ -482,8 +484,7 @@ void UniformLightGrid::chooseGridsAndLights(RenderContext* pRenderContext, const
     auto var = mpGridAndLightSelector.getRootVar()["PerFrameCB"];
     var["dispatchDim"] = mSharedParams.frameDim;
     var["frameCount"] = mSharedParams.frameCount;
-    var["minDistance"] = mGridAndLightSelectorParams.minDistanceOfGirdSelection;
-    var["samplesPerDirection"] = mGridAndLightSelectorParams.samplesPerDirection;
+    var["RISSampleCount"] = mGridAndLightSelectorParams.RISSampleCount;
 
     // power sampler
     var["powerGridCount"] = mPowerGrids.size();
@@ -513,6 +514,9 @@ RenderPassReflection UniformLightGrid::reflect(const CompileData& compileData)
 {
     auto reflector = PathTracer::reflect(compileData);
 
+    for (const auto& input : kInputChannels)
+        reflector.addInput(input.name, input.desc);
+
     // TODO: find a place to clear this texture
     reflector.addInternal(kLightIndexInternal, "Light index")
         .format(ResourceFormat::RGBA32Float)
@@ -533,8 +537,8 @@ void UniformLightGrid::execute(RenderContext* pRenderContext, const RenderData& 
     generateOctree(pRenderContext);
     constructBVHTree(pRenderContext);
 
-    genPowerNode(pRenderContext);
-    genPowerGrid(pRenderContext);
+    //genPowerNode(pRenderContext);
+    //genPowerGrid(pRenderContext);
 
     chooseGridsAndLights(pRenderContext, renderData);
 
@@ -613,26 +617,40 @@ void UniformLightGrid::renderUI(Gui::Widgets& widget)
         mGridAndLightSelectorParams.needToRegenerateSelector = false;
         widget.text("Grid & Light Selector Params");
         widget.var("grid morton code prefix length", mGridAndLightSelectorParams.gridMortonCodePrefixLength, 3u, 27u, 3u);
-        widget.var("min distance of grid selection", mGridAndLightSelectorParams.minDistanceOfGirdSelection, 0.1f, 100.0f, 0.1f);
-        widget.var("grid samples per direction", mGridAndLightSelectorParams.samplesPerDirection, 1u, 64u, 1u);
+        widget.var("grid samples per direction", mGridAndLightSelectorParams.RISSampleCount, 1u, 64u, 1u);
 
         { // Grid selection strategy gui component
             Gui::DropdownList list;
             list.push_back({ (uint)GridSelectionStrategy::Octree, "Octree" });
+            list.push_back({ (uint)GridSelectionStrategy::OctreeWithResampling, "OctreeWithResampling" });
             list.push_back({ (uint)GridSelectionStrategy::BVH, "BVH" });
             list.push_back({ (uint)GridSelectionStrategy::Resampling, "Resampling" });
+            list.push_back({ (uint)GridSelectionStrategy::BruteForceResampling, "BruteForceResampling" });
+            list.push_back({ (uint)GridSelectionStrategy::KNNWithFixedRadius, "KNNWithFixedRadius" });
+            list.push_back({ (uint)GridSelectionStrategy::KNNWithFixedK, "KNNWithFixedK" });
+            list.push_back({ (uint)GridSelectionStrategy::Debug, "Debug" });
             if (widget.dropdown("Grid selection strategy", list, mGridAndLightSelectorParams.gridSelectionStrategy))
                 mGridAndLightSelectorParams.needToRegenerateSelector = true;
         }
 
         // Tree traverse weight gui component
-        if (mGridAndLightSelectorParams.gridSelectionStrategy == (uint)GridSelectionStrategy::Octree || mGridAndLightSelectorParams.gridSelectionStrategy == (uint)GridSelectionStrategy::BVH)
         {
             Gui::DropdownList list;
             list.push_back({ (uint)TreeTraverseWeightType::DistanceIntensity, "DistanceIntensity" });
             list.push_back({ (uint)TreeTraverseWeightType::DirectionDistanceIntensity, "DirectionDistanceIntensity" });
             list.push_back({ (uint)TreeTraverseWeightType::BRDFShading, "BRDFShading" });
+            list.push_back({ (uint)TreeTraverseWeightType::Debug, "Debug" });
             if (widget.dropdown("Tree traverse weight type", list, mGridAndLightSelectorParams.treeTraverseWeightType))
+                mGridAndLightSelectorParams.needToRegenerateSelector = true;
+        }
+
+        // Triangle selection strategy gui component
+        {
+            Gui::DropdownList list;
+            list.push_back({ (uint)TriangleSelectionStrategy::Uniform, "Uniform" });
+            list.push_back({ (uint)TriangleSelectionStrategy::Resampling, "Resampling" });
+            list.push_back({ (uint)TriangleSelectionStrategy::Debug, "Debug" });
+            if (widget.dropdown("Triangle selection strategy", list, mGridAndLightSelectorParams.triangleSelectionStrategy))
                 mGridAndLightSelectorParams.needToRegenerateSelector = true;
         }
     }
@@ -708,4 +726,5 @@ void UniformLightGrid::addGridAndLightSelectorStaticParams(Program::DefineList& 
     list.add("ULG_GRID_AND_LIGHT_SELECTOR_PARAM", "1");
     list.add("TREE_TRAVERSE_WEIGHT_TYPE", std::to_string(mGridAndLightSelectorParams.treeTraverseWeightType));
     list.add("GRID_SELECTION_STRATEGY", std::to_string(mGridAndLightSelectorParams.gridSelectionStrategy));
+    list.add("TRIANGLE_SELECTION_STRATEGY", std::to_string(mGridAndLightSelectorParams.triangleSelectionStrategy));
 }

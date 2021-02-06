@@ -5,22 +5,36 @@ enum class TreeTraverseWeightType
     DistanceIntensity           = 1,
     DirectionDistanceIntensity  = 2,
     BRDFShading                 = 3,
+    Debug                       = 4, // >>> For debug usage.
 };
 
 enum class GridSelectionStrategy
 {
-    Octree                      = 1, // >>> This will lead to blocking
-    BVH                         = 2, // >>> This cannot select nearing lights
-    Resampling                  = 3, // >>> BUG: This cannot select light for some walls
+    Octree                      = 1, // >>> This cannot choose far lights.
+    OctreeWithResampling        = 2, // >>> Still cannot generate correct for ceiling in cornell box.
+    BVH                         = 3, // >>> This cannot build balanced tree.
+    Resampling                  = 4, // >>> This cannot sample nearing lights.
+    BruteForceResampling        = 5, 
+    KNNWithFixedRadius          = 6, // >>> This will lead to blocking.
+    KNNWithFixedK               = 7, // >>> This can only choose nearing lights.
+    Debug                       = 8, // >>> For debug usage.
+};
+
+enum class TriangleSelectionStrategy
+{
+    Uniform                     = 1,
+    Resampling                  = 2,
+    Debug                       = 3, // >>> For debug usage.
 };
 
 #ifdef ULG_TRACER_PARAM
-    static const bool kShadowRayAlwaysVisible = SHADOW_RAY_ALWAYS_VISIBLE;
+    static const bool kShadowRayAlwaysVisible  = SHADOW_RAY_ALWAYS_VISIBLE;
     static const bool kUseGroundTruthShadowRay = USE_GROUND_TRUTH_SHADOW_RAY;
-    static const bool kUseReflection = USE_REFLECTION;
+    static const bool kUseReflection           = USE_REFLECTION;
 #endif
 
 #ifdef ULG_GRID_AND_LIGHT_SELECTOR_PARAM
-    static const uint kTreeTraverseWeightType = TREE_TRAVERSE_WEIGHT_TYPE;
-    static const uint kGridSelectionStrategy  = GRID_SELECTION_STRATEGY;
+    static const uint kTreeTraverseWeightType    = TREE_TRAVERSE_WEIGHT_TYPE;
+    static const uint kGridSelectionStrategy     = GRID_SELECTION_STRATEGY;
+    static const uint kTriangleSelectionStrategy = TRIANGLE_SELECTION_STRATEGY;
 #endif

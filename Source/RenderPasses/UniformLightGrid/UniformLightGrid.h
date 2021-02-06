@@ -109,7 +109,6 @@ private:
     // leaf node data
     std::vector<BVHLeafNode> mLeafNodes;
     Buffer::SharedPtr mpBVHLeafNodesBuffer;
-    Buffer::SharedPtr mpBVHLeafNodesStagingBuffer;
     ComputePass::SharedPtr mpLeafNodeGenerator;
 
     // internal node data
@@ -119,7 +118,6 @@ private:
     // uniform grid data
     std::vector<UniformGrid> mGrids;
     Buffer::SharedPtr mpGridDataBuffer;
-    Buffer::SharedPtr mpGridDataStagingBuffer;
 
     // octree data
     Octree mOctree;
@@ -139,10 +137,10 @@ private:
     {
         bool needToRegenerateSelector = false;
         uint gridMortonCodePrefixLength = 27;
-        float minDistanceOfGirdSelection = 0.1f;
-        uint samplesPerDirection = 8;
+        uint RISSampleCount = 4;
         uint treeTraverseWeightType = (uint)(TreeTraverseWeightType::DistanceIntensity);
-        uint gridSelectionStrategy = (uint)(GridSelectionStrategy::Octree);
+        uint gridSelectionStrategy = (uint)(GridSelectionStrategy::OctreeWithResampling);
+        uint triangleSelectionStrategy = (uint)(TriangleSelectionStrategy::Uniform);
     } mGridAndLightSelectorParams;
 
     ComputePass::SharedPtr mpGridAndLightSelector;
