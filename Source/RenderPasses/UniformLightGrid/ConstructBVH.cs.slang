@@ -1,8 +1,3 @@
-// TODO:
-//   1. remove `commonPrefix` and get `commonPrefix` by `splitPoint` and `commonPrefixLength` 
-//   2. pack `isLChildLeaf`, `isRChildLeaf` and `commonPrefixLength` into a uint
-//   3. remove min and max in `setIsLChildLeaf` and `setIsRChildLeaf`
-//   4. add temp variable for getters and setters in `generateTree`
 #include "BVHNodeData.slangh"
 #include "GridData.slangh"
 
@@ -58,13 +53,11 @@ uint findSplit(uint first, uint last)
 
     // Calculate the number of highest bits that are the same
     // for all objects, using the count-leading-zeros intrinsic.
-
     int commonPrefix = calcCommonPrefix(first, last);
 
     // Use binary search to find where the next bit differs.
     // Specifically, we are looking for the highest object that
     // shares more than commonPrefix bits with the first one.
-
     int split = first; // initial guess
     int step = last - first;
 
@@ -85,6 +78,45 @@ uint findSplit(uint first, uint last)
     return split;
 }
 
+[numthreads(GROUP_SIZE, 1, 1)]
+void constructBVH(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint idx = dispatchThreadId.x;
+    if (idx >= numLeafNodes - 1) return;
+    // Find out which range of objects the node corresponds to.
+    // (This is where the magic happens!)
+
+    BVHInternalNode node = {};
+
+    uint2 range = determineRange(idx);
+    uint first = range.x;
+    uint last = range.y;
+    node.range = first > last ? uint2(last, first) : uint2(first, last);
+
+    node.setCommonPrefixLength(calcCommonPrefix(first, last)); // TODO: common prefix may overflow here
+
+    // Determine where to split the range.
+    // uint split = findSplit(first, last, idx);
+    uint split = findSplit(node.range.x, node.range.y);
+    node.split = split;
+    node.splitMortonCode = gLeafNodes[split].mortonCode;
+
+    // Select Lchild.
+    node.lChildId = split;
+    node.setIsLChildLeaf(split == min(first, last));
+    // Select Rchild.
+    node.rChildId = split + 1;
+    node.setIsRChildLeaf(split + 1 == max(last, first));
+
+    float3 intensity = 0;
+    for (uint i = node.range.x; i <= node.range.y; i++)
+        intensity += gLeafNodes[i].intensity;
+    node.intensity = intensity;
+
+    gInternalNodes[idx] = node;
+}
+
+// ----- Backup code ----- //
 // uint findSplit(uint first, uint last, uint idx)
 // {
 //     int nodePrefix = calcCommonPrefix(first, last);
@@ -104,42 +136,3 @@ uint findSplit(uint first, uint last)
 
 //     return idx + S * d + min(d, 0);
 // }
-
-[numthreads(GROUP_SIZE, 1, 1)]
-void constructBVH(uint3 dispatchThreadId : SV_DispatchThreadID)
-{
-    uint idx = dispatchThreadId.x;
-    if (idx >= numLeafNodes - 1) return;
-    // Find out which range of objects the node corresponds to.
-    // (This is where the magic happens!)
-
-    BVHInternalNode node = {};
-
-    uint2 range = determineRange(idx);
-    uint first = range.x;
-    uint last = range.y;
-    node.range = first > last ? uint2(last, first) : uint2(first, last);
-
-    node.setCommonPrefixLength(calcCommonPrefix(first, last)); // TODO: common prefix may overflow here
-    // node.commonPrefix = gLeafNodes[first].mortonCode >> (31 - node.getCommonPrefixLength());
-
-    // Determine where to split the range.
-    // uint split = findSplit(first, last, idx);
-    uint split = findSplit(node.range.x, node.range.y);
-    node.commonPrefix = split;
-    node.splitMortonCode = gLeafNodes[split].mortonCode;
-
-    // Select Lchild.
-    node.lChildId = split;
-    node.setIsLChildLeaf(split == min(first, last));
-    // Select Rchild.
-    node.rChildId = split + 1;
-    node.setIsRChildLeaf(split + 1 == max(last, first));
-
-    float3 intensity = 0;
-    for (uint i = node.range.x; i <= node.range.y; i++)
-        intensity += gLeafNodes[i].intensity;
-    node.intensity = intensity;
-
-    gInternalNodes[idx] = node;
-}

@@ -42,7 +42,7 @@ UniformGrid traverseTreeForGird<S : ISampleGenerator>(const ShadingData sd, floa
     uint currNodeId = 0;
     BVHInternalNode currNode = gInternalNodes[currNodeId];
     pdf = 1.f;
-    uint deep = 0;
+    uint depth = 0;
     while (true)
     {
         // TODO: add struct for childs
@@ -101,7 +101,7 @@ UniformGrid traverseTreeForGird<S : ISampleGenerator>(const ShadingData sd, floa
         // TODO: make a function for weigh type select
         if (kTreeTraverseWeightType == (uint)TreeTraverseWeightType::DistanceIntensity)
         {
-            if (deep < 5)
+            if (depth < 5)
             {
                 pL = length(lChildIntensity) / lChildDis / lChildDis;
                 pR = length(rChildIntensity) / rChildDis / rChildDis;
@@ -116,8 +116,6 @@ UniformGrid traverseTreeForGird<S : ISampleGenerator>(const ShadingData sd, floa
         {
             pL = length(lChildIntensity) * clamp(dot(dir, lChildDir), 0.0f, 1.f) / lChildDis / lChildDis;
             pR = length(rChildIntensity) * clamp(dot(dir, rChildDir), 0.0f, 1.f) / rChildDis / rChildDis;
-            // pL = length(lChildIntensity) * clamp(dot(sd.N, lChildDir), 0.0f, 1.f) / lChildDis / lChildDis;
-            // pR = length(rChildIntensity) * clamp(dot(sd.N, rChildDir), 0.0f, 1.f) / rChildDis / rChildDis;
         }
         else if (kTreeTraverseWeightType == (uint)TreeTraverseWeightType::BRDFShading)
         {
@@ -155,7 +153,7 @@ UniformGrid traverseTreeForGird<S : ISampleGenerator>(const ShadingData sd, floa
             currNode = gInternalNodes[currNodeId];
         }
 
-        deep++;
+        depth++;
     }
 
     return grid;
@@ -174,7 +172,7 @@ cbuffer PerFrameOctreeCB
 	uint octreeRootIndex;
 }
 
-void buildGridByGridNode(in OctreeNode octreeNode, out UniformGrid grid)
+void buildGridByOctreeNode(in OctreeNode octreeNode, out UniformGrid grid)
 {
     grid.pos = octreeNode.pos;
     grid.intensity = octreeNode.intensity;
@@ -223,57 +221,7 @@ float computeOctreeNodeWeightForTreeTraversal(const ShadingData sd, const Octree
     return weight;
 }
 
-UniformGrid traverseOctree<S : ISampleGenerator>(const ShadingData sd, const uint rootIndex, out float pdf, inout S sg)
-{
-    // initialize return values
-    UniformGrid grid = {};
-    pdf = 1.f;
-
-    uint currNodeIdx = rootIndex;
-    while (true)
-    {
-        OctreeNode currNode = gOctree[currNodeIdx];
-
-        if (currNode.isLeaf)
-        {
-            buildGridByGridNode(currNode, grid);
-            break;
-        }
-
-        uint nextNodeIdx = currNodeIdx; // next child grid to traverse
-        float nextNodePdf = 0.00001f;
-        float weightSum = 0.00001f;
-        for (int i = currNode.childRange.x; i <= currNode.childRange.y; i++)
-        {
-            OctreeNode child = gOctree[i];
-
-            float childWeight = computeOctreeNodeWeightForTreeTraversal(sd, child);
-            weightSum += childWeight;
-            if (sampleNext1D(sg) < childWeight / weightSum)
-            {
-                nextNodeIdx = i;
-                nextNodePdf = childWeight;
-            }
-        }
-        nextNodePdf = nextNodePdf / weightSum;
-
-        // can't find a child to traverse
-        if (nextNodeIdx == currNodeIdx)
-        {
-            buildGridByGridNode(currNode, grid);
-            break;
-        }
-        else
-        {
-            pdf *= nextNodePdf;
-            currNodeIdx = nextNodeIdx;
-        }
-    }
-
-    return grid;
-}
-
-OctreeNode traverseOctreeForNode<S : ISampleGenerator>(const ShadingData sd, const uint rootIndex, const uint leafCount, out float pdf, inout S sg)
+OctreeNode traverseOctree<S : ISampleGenerator>(const ShadingData sd, const uint rootIndex, const uint leafCount, out float pdf, inout S sg)
 {
     // initialize return values
     pdf = 1.f;
@@ -283,7 +231,7 @@ OctreeNode traverseOctreeForNode<S : ISampleGenerator>(const ShadingData sd, con
     {
         OctreeNode currNode = gOctree[currNodeIdx];
 
-        if (currNode.leafRange.y - currNode.leafRange.x + 1 <= leafCount)
+        if (currNode.isLeaf || currNode.leafRange.y - currNode.leafRange.x + 1 <= leafCount)
             return currNode;
 
         uint nextNodeIdx = currNodeIdx; // next child grid to traverse
@@ -317,35 +265,6 @@ OctreeNode traverseOctreeForNode<S : ISampleGenerator>(const ShadingData sd, con
 
     OctreeNode bugNode = gOctree[rootIndex];
     return bugNode; // return only if bug happens
-}
-
-OctreeNode findContainingGrid(uint mortonCode)
-{
-    uint currNodeIdx = octreeRootIndex;
-    for (int level = 0; level < 10; level++)
-    {
-        OctreeNode currNode = gOctree[currNodeIdx];
-
-        if (currNode.isLeaf) return currNode;
-
-        uint nextNodeIdx = currNodeIdx; // next child grid to traverse
-        for (int i = currNode.childRange.x; i <= currNode.childRange.y; i++)
-        {
-            OctreeNode child = gOctree[i];
-            if (hasSamePrefix(child.mortonCode, mortonCode, child.prefixLength))
-            {
-                nextNodeIdx = i;
-                break;
-            }
-        }
-
-        // can't find a child containg this morton code
-        if (nextNodeIdx == currNodeIdx) return currNode;
-        else currNodeIdx = nextNodeIdx;
-    }
-
-    OctreeNode ret = {};
-    return ret; // return root only if bug happens
 }
 
 OctreeNode findContainingGrid(AABB aabb)

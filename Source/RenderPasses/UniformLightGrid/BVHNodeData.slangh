@@ -15,7 +15,7 @@ struct BVHInternalNode
     uint lChildId = 0;
     uint rChildId = 0;
     uint splitMortonCode = 0;
-    uint commonPrefix = 0; // TODO: remove this
+    uint split = 0; // TODO: remove this
     uint2 range = uint2(0, 0);
     float3 intensity = float3(0, 0, 0);
 

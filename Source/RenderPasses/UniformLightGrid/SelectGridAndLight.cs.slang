@@ -49,40 +49,29 @@ void selectGridByOctree<S : ISampleGenerator>(const ShadingData sd, inout S sg, 
     chosenGrid = {};
     chosenGridPdf = 1.0f;
 
-    float3 pos = sd.posW;
-
-    float3 chosenGridBSDF = 0;
-    float chosenGridDistance = 0;
+    OctreeNode chosenNode = {};
+    float chosenNodeWeight = 1.f;
     float weightSum = 0;
-    for (int dirSampleIdx = 0; dirSampleIdx < RISSampleCount; dirSampleIdx++)
+    for (int risSampleIdx = 0; risSampleIdx < RISSampleCount; risSampleIdx++)
     {
-        BSDFSample bsdfSample;
-        uint lobeBackup = sd.activeLobes;
-        sampleBSDF(sd, sg, bsdfSample);
-        float3 dir = bsdfSample.wi;
-        float dirPdf = bsdfSample.pdf;
-        float gridPdf = 1.f;
-
+        float nodePdf = 1.f;
         // choose grid
-        UniformGrid grid = traverseOctree(sd, octreeRootIndex, gridPdf, sg);
+        OctreeNode node = traverseOctree(sd, octreeRootIndex, 1, nodePdf, sg);
 
-        // recompute BSDF & distance
-        float3 bsdf = float3(1,1,1);
-        // float3 bsdf = evalBSDFCosine(sd, normalize(grid.pos - pos));
-
-        // random choose by weight
-        float distance = length(grid.pos - pos);
-        float gridWeight = length(bsdf * grid.intensity) / (distance * distance) / gridPdf;
-        weightSum += gridWeight;
-        if (sampleNext1D(sg) < gridWeight / weightSum)
+        float3 bsdf = float3(1, 1, 1);
+        float distance = length(node.pos - sd.posW);
+        float weight = length(bsdf * node.intensity) / (distance * distance);
+        float p = weight / nodePdf;
+        weightSum += p;
+        if (sampleNext1D(sg) < p / weightSum)
         {
-            chosenGrid = grid;
-            chosenGridBSDF = bsdf;
-            chosenGridDistance = distance;
+            chosenNode = node;
+            chosenNodeWeight = weight;
         }
     }
 
-    float chosenGridWeight = length(chosenGridBSDF * chosenGrid.intensity) / max((chosenGridDistance * chosenGridDistance), 0.0001f);
+    buildGridByOctreeNode(chosenNode, chosenGrid);
+    float chosenGridWeight = chosenNodeWeight;
     chosenGridPdf = chosenGridWeight * RISSampleCount / max(weightSum, 0.0001f);
 }
 
@@ -94,7 +83,7 @@ void selectGridByOctreeWithResampling<S : ISampleGenerator>(const ShadingData sd
 
     // choose node
     float nodePdf = 1.f;
-    OctreeNode root = traverseOctreeForNode(sd, octreeRootIndex, 64, nodePdf, sg);
+    OctreeNode root = traverseOctree(sd, octreeRootIndex, 64, nodePdf, sg);
     
     // resampling
     OctreeNode chosenNode = {};
@@ -112,7 +101,7 @@ void selectGridByOctreeWithResampling<S : ISampleGenerator>(const ShadingData sd
         }
     }
 
-    buildGridByGridNode(chosenNode, chosenGrid);
+    buildGridByOctreeNode(chosenNode, chosenGrid);
     chosenGridPdf = nodePdf * (chosenNodeWeight / weightSum);
 }
 
@@ -134,7 +123,7 @@ void selectGridByBVH<S : ISampleGenerator>(const ShadingData sd, inout S sg, out
     float3 chosenGridBSDF = 0;
     float chosenGridDistance = 0;
     float weightSum = 0;
-    for (int dirSampleIdx = 0; dirSampleIdx < RISSampleCount; dirSampleIdx++)
+    for (int risSampleIdx = 0; risSampleIdx < RISSampleCount; risSampleIdx++)
     {
         // choose grid
         float gridPdf = 1.f;
@@ -145,8 +134,7 @@ void selectGridByBVH<S : ISampleGenerator>(const ShadingData sd, inout S sg, out
         float3 bsdf = evalBSDFCosine(sd, normalize(grid.pos - pos));
         float  distance = length(grid.pos - pos);
 
-        // ------------------------ BUG ------------------------ //
-        // random choose by weight
+        // resampling
         float gridWeight = length(bsdf * grid.intensity) / (distance * distance) / gridPdf;
         weightSum += gridWeight;
         if (sampleNext1D(sg) < gridWeight / weightSum)
@@ -159,7 +147,6 @@ void selectGridByBVH<S : ISampleGenerator>(const ShadingData sd, inout S sg, out
 
     float chosenGridWeight = length(chosenGridBSDF * chosenGrid.intensity) / max((chosenGridDistance * chosenGridDistance), 0.0001f);
     chosenGridPdf = chosenGridWeight * RISSampleCount / max(weightSum, 0.0001f);
-        // ------------------------ BUG ------------------------ //
 }
 
 // NOTE: If there is only one grid, half of the scene (surface "in front of" the grid position) will evaluate bsdf == 0.
@@ -234,7 +221,7 @@ void selectGridByKNNWithFixedRadius<S : ISampleGenerator>(float ao, const Shadin
             chosenNodeWeight = nodeWeight;
         }
     }
-    buildGridByGridNode(chosenNode, chosenGrid);
+    buildGridByOctreeNode(chosenNode, chosenGrid);
     chosenGridPdf = chosenNodeWeight / weightSum;
 }
 
@@ -263,7 +250,7 @@ void selectGridByBruteForceResampling<S : ISampleGenerator>(const ShadingData sd
         }
     }
 
-    buildGridByGridNode(chosenNode, chosenGrid);
+    buildGridByOctreeNode(chosenNode, chosenGrid);
     chosenGridPdf = chosenNodeWeight / weightSum;
 }
 
@@ -344,7 +331,7 @@ void selectGridByKNNWithFixedK<S : ISampleGenerator>(const ShadingData sd, inout
             chosenNodeWeight = nodeWeight;
         }
     }
-    buildGridByGridNode(chosenNode, chosenGrid);
+    buildGridByOctreeNode(chosenNode, chosenGrid);
     chosenGridPdf = chosenNodeWeight / weightSum;
 }
 
