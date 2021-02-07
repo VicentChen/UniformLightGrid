@@ -166,7 +166,6 @@ void SSAOMap::execute(RenderContext* pRenderContext, const RenderData& renderDat
     auto pAOOut = renderData[kAOOut]->asTexture();
     auto pAoMap = renderData[kAoMap]->asTexture();
 
-    assert(pColorOut != pColorIn);
     pAoMap = generateAOMap(pRenderContext, mpScene->getCamera().get(), pDepth, pNormals);
 
     if (mApplyBlur)
