@@ -31,7 +31,6 @@ Texture2D<float4> gAOMap;
 
 // float4: triangleIndex, pdf, ??, ??
 RWTexture2D<float4> gLightIndex;
-StructuredBuffer<BVHPowerNode> gPowerNodes;
 StructuredBuffer<UniformGrid> gPowerGrids;
 
 float computeOctreeNodeWeightForResampling(const OctreeNode node, const ShadingData sd)
@@ -403,9 +402,9 @@ void chooseTriangle<S : ISampleGenerator>(in uint2 range, in const ShadingData s
         float idxPdf = 1.f;
         sampleRangeUniformly(range, sg, idx, idxPdf);
 
-        BVHLeafNode node = gLeafNodes[idx];
-        float distance = length(node.debug.xyz - pos);
-        float pHat = length(node.intensity) / (distance * distance);
+        LightProxy proxy = gProxys[idx];
+        float distance = length(proxy.pos - pos);
+        float pHat = length(proxy.intensity) / (distance * distance);
         // float pHat = 100.f / distance / distance;
         float p = pHat / idxPdf;
         weightSum += p;
@@ -471,7 +470,7 @@ void selectGridAndLight(uint3 dispatchThreadId : SV_DispatchThreadID)
             sampleRangeUniformly(chosenGrid.range, sg, proxyIdx, proxyPdf);
 
         // TODO: add if for two triangle index?
-        uint emissiveTriangleIndex = gLeafNodes[proxyIdx].triangleIdx;
+        uint emissiveTriangleIndex = gProxys[proxyIdx].triangleIdx;
         // uint emissiveTriangleIndex = gPowerNodes[proxyIdx].triangleIdx;
         float emissivePdf = chosenGridPdf * proxyPdf;
 

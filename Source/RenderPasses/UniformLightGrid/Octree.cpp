@@ -35,14 +35,14 @@ namespace
         });
 }
 
-void Octree::buildOctree(RenderContext* pContext, const std::vector<BVHLeafNode>& points, const Params& params)
+void Octree::buildOctree(RenderContext* pContext, const std::vector<LightProxy>& proxys, const Params& params)
 {
-    assert(points.size() > 0);
+    assert(proxys.size() > 0);
     assert(params.leafNodePrefixLength % 3 == 0);
     mParams = params;
 
     clearCpuBuffers();
-    mergePoints(points); // generate leaf nodes
+    mergePoints(proxys); // generate leaf nodes
     mergeNodes(); // generate internal nodes
     updateDrawParams();
 
@@ -102,20 +102,20 @@ void Octree::clearCpuBuffers()
     mLevelIndex.clear();
 }
 
-void Octree::mergePoints(const std::vector<BVHLeafNode>& points)
+void Octree::mergePoints(const std::vector<LightProxy>& proxys)
 {
     // TODO: too many duplicate code
-    for (size_t i = 0; i < points.size();)
+    for (size_t i = 0; i < proxys.size();)
     {
         uint mask = ~(0xFFFFFFFF << (30 - mParams.leafNodePrefixLength));
-        uint bound = points[i].mortonCode | mask;
+        uint bound = proxys[i].mortonCode | mask;
 
         float3 intensity = float3(0, 0, 0);
 
         size_t beginIdx = i;
-        while (i < points.size() && points[i].mortonCode <= bound)
+        while (i < proxys.size() && proxys[i].mortonCode <= bound)
         {
-            intensity += points[i].intensity;
+            intensity += proxys[i].intensity;
             i++;
         }
         size_t endIdx = i - 1;

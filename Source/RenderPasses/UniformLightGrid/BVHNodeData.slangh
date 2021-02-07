@@ -36,20 +36,18 @@ struct BVHInternalNode
 #endif
 };
 
-struct BVHLeafNode
+struct LightProxy
 {
+    float3 pos = float3(0, 0, 0);
     uint mortonCode = 0;
     uint triangleIdx = 0;
     float3 intensity = float3(0, 0, 0);
-    float4 debug = float4(0, 0, 0, 0);
-};
-
-struct BVHPowerNode
-{
-    uint mortonCode = 0;
-    uint triangleIdx = 0;
+    // fluxData in LightCollection
+    float3 averageRadiance = float3(0, 0, 0);
     float flux = 0;
-    float3 intensity = float3(0, 0, 0);
+
+    // above attributes use 9 * 4 bytes, add 3 * 4 bytes padding
+    float3 paddingAndDebug = float3(0, 0, 0);
 };
 
 END_NAMESPACE_FALCOR

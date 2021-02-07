@@ -13,17 +13,17 @@ cbuffer PerFrameCB
     uint emissiveTriangleCount;
 }
 
-RWStructuredBuffer<BVHLeafNode> gLeafNodes;
+RWStructuredBuffer<LightProxy> gProxys;
 
 [numthreads(GROUP_SIZE, 1, 1)]
-void genBVHLeafNodes(uint3 dispatchThreadId : SV_DispatchThreadID)
+void genLightProxys(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint threadId = dispatchThreadId.x;
     if (threadId >= emissiveTriangleCount) return;
 
     // prepare triangle
     const EmissiveTriangle tri = gScene.lightCollection.getTriangle(threadId);
-    float3 barycentrics = float3(1.0f/3);
+    float3 barycentrics = float3(1.0f / 3);
     float3 triangleCenter = tri.getPosition(barycentrics);
     float2 uv = tri.getTexCoord(barycentrics);
     float3 emissive = gScene.getEmissive(tri.materialID, uv, gScene.materialResources[tri.materialID]);
@@ -31,11 +31,14 @@ void genBVHLeafNodes(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     uint mortonCode = computeMortonCodeByPos(triangleCenter);
 
-    BVHLeafNode node = {};
-    node.mortonCode = mortonCode;
-    node.triangleIdx = threadId;
-    node.intensity = emissive * area;
-    node.debug = float4(triangleCenter, area);
+    LightProxy proxy = {};
+    proxy.pos = triangleCenter;
+    proxy.mortonCode = mortonCode;
+    proxy.triangleIdx = threadId;
+    proxy.intensity = emissive * area;
+    proxy.averageRadiance = gScene.lightCollection.fluxData[threadId].averageRadiance;
+    proxy.flux = gScene.lightCollection.fluxData[threadId].flux;
+    proxy.paddingAndDebug = float3(0, 0, 0);
 
-    gLeafNodes[threadId] = node;
+    gProxys[threadId] = proxy;
 }

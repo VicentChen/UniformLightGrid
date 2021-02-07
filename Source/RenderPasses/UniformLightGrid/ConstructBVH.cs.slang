@@ -11,6 +11,7 @@
     #error GROUP_SIZE is not defined. Add define in cpp file.
 #endif
 
+// TODO: rename this
 StructuredBuffer<UniformGrid> gLeafNodes;
 RWStructuredBuffer<BVHInternalNode> gInternalNodes;
 

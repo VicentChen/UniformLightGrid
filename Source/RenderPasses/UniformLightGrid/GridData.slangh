@@ -11,7 +11,7 @@ struct UniformGrid
 
     uint gridIndex = 0;
     uint mortonCode = 0;
-    bool isLeafNode = false;
+    bool isLeafNode = false; // TODO: remove this?
     float flux = 0;
     // TODO: compute padding
 };
@@ -27,6 +27,7 @@ struct OctreeNode
     uint2 childRange = uint2(0, 0);
     uint2 leafRange = uint2(0, 0);
     uint2 triangleRange = uint2(0, 0);
+
     // above attributes use 13 * 4 bytes, add 3 * 4 bytes padding
     float3 paddingAndDebug = float3(0, 0, 0);
 };

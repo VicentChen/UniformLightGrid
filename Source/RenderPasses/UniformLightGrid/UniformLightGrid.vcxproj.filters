@@ -41,13 +41,13 @@
     <ShaderSource Include="SelectGridAndLight.cs.slang">
       <Filter>ULG</Filter>
     </ShaderSource>
-    <ShaderSource Include="GenBVHLeafNodes.cs.slang">
-      <Filter>ULG</Filter>
-    </ShaderSource>
     <ShaderSource Include="ConstructBVH.cs.slang">
       <Filter>ULG</Filter>
     </ShaderSource>
     <ShaderSource Include="ULGStaticParams.slang">
+      <Filter>ULG</Filter>
+    </ShaderSource>
+    <ShaderSource Include="GenLightProxys.cs.slang">
       <Filter>ULG</Filter>
     </ShaderSource>
   </ItemGroup>

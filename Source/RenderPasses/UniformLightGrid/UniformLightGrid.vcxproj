@@ -43,7 +43,7 @@
     <ShaderSource Include="BVHNodeData.slangh" />
     <ShaderSource Include="ConstructBVH.cs.slang" />
     <ShaderSource Include="EmissiveULGSampler.slang" />
-    <ShaderSource Include="GenBVHLeafNodes.cs.slang" />
+    <ShaderSource Include="GenLightProxys.cs.slang" />
     <ShaderSource Include="GridData.slangh" />
     <ShaderSource Include="MortonCodeHelpers.slang" />
     <ShaderSource Include="Samplers.slang" />

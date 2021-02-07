@@ -24,14 +24,14 @@ public:
     Buffer::SharedPtr& getGpuBufferPtr() { return mpOctreeBuffer; }
 
     // FIXME: currently we use BVH leaf nodes as input to octree
-    void buildOctree(RenderContext* pContext, const std::vector<BVHLeafNode>& points, const Params& params);
+    void buildOctree(RenderContext* pContext, const std::vector<LightProxy>& proxys, const Params& params);
     void visualize(RenderContext* pContext, Scene::SharedPtr pScene, const RenderData& renderData);
     void renderUI(Gui::Widgets& widget);
 
 private:
     void clearCpuBuffers();
     float4x4 computeNodeWorldMat(uint mortonCode, uint prefixLength);
-    void mergePoints(const std::vector<BVHLeafNode>& points);
+    void mergePoints(const std::vector<LightProxy>& proxys);
     void mergeNodes();
     void prepareResources(RenderContext* pContext, const RenderData& renderData);
     void updateDrawParams();

@@ -70,8 +70,8 @@ private:
 
     AABB sceneBoundHelper();
 
-    void generateBVHLeafNodes(RenderContext* pRenderContext);
-    void sortLeafNodes(RenderContext* pRenderContext);
+    void generateLightProxys(RenderContext* pRenderContext);
+    void sortProxys(RenderContext* pRenderContext);
     void constructBVHTree(RenderContext* pRenderContext);
 
     void genPowerNode(RenderContext* pRenderContext);
@@ -106,10 +106,10 @@ private:
         ParameterBlock::SharedPtr pParameterBlock;      ///< ParameterBlock for all data.
     } mULGTracer;
 
-    // leaf node data
-    std::vector<BVHLeafNode> mLeafNodes;
-    Buffer::SharedPtr mpBVHLeafNodesBuffer;
-    ComputePass::SharedPtr mpLeafNodeGenerator;
+    // light proxy data
+    std::vector<LightProxy> mProxys;
+    Buffer::SharedPtr mpProxyBuffer;
+    ComputePass::SharedPtr mpProxyGenerator;
 
     // internal node data
     Buffer::SharedPtr mpBVHInternalNodesBuffer;
@@ -123,9 +123,6 @@ private:
     Octree mOctree;
 
     // power sampler
-    std::vector<BVHPowerNode> mPowerNodes;
-    Buffer::SharedPtr mpPowerLeafNodesBuffer;
-
     std::vector<UniformGrid> mPowerGrids;
     Buffer::SharedPtr mpPowerGridDataBuffer;
 

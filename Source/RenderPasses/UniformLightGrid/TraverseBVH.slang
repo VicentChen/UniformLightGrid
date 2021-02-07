@@ -6,7 +6,7 @@ __exported import Utils.Sampling.SampleGenerator;
 __exported import MortonCodeHelpers;
 __exported import ULGStaticParams;
 
-StructuredBuffer<BVHLeafNode> gLeafNodes;
+StructuredBuffer<LightProxy> gProxys;
 StructuredBuffer<BVHInternalNode> gInternalNodes;
 StructuredBuffer<UniformGrid> gGrids;
 
