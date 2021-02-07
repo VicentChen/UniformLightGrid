@@ -11,7 +11,6 @@ struct UniformGrid
 
     uint gridIndex = 0;
     uint mortonCode = 0;
-    bool isLeafNode = false; // TODO: remove this?
     float flux = 0;
     // TODO: compute padding
 };

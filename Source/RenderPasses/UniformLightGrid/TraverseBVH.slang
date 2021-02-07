@@ -1,3 +1,4 @@
+#include "LightProxyData.slangh"
 #include "BVHNodeData.slangh"
 #include "GridData.slangh"
 import Scene.ShadingData;
@@ -10,7 +11,6 @@ StructuredBuffer<LightProxy> gProxys;
 StructuredBuffer<BVHInternalNode> gInternalNodes;
 StructuredBuffer<UniformGrid> gGrids;
 
-// TODO: better way to solve cbuffer name conflict
 cbuffer PerFrameBVHCB
 {
     uint gridMortonCodePrefixLength;
@@ -45,8 +45,6 @@ UniformGrid traverseTreeForGird<S : ISampleGenerator>(const ShadingData sd, floa
     uint depth = 0;
     while (true)
     {
-        // TODO: add struct for childs
-        // TODO: add function for childs
         uint lChild = currNode.lChildId;
         uint2 lChildRange = currNode.range;
         bool isLChildLeaf = currNode.isLChildLeaf;
@@ -98,7 +96,6 @@ UniformGrid traverseTreeForGird<S : ISampleGenerator>(const ShadingData sd, floa
         // choose one child
         bool isLeaf = false;
         float pL, pR;
-        // TODO: make a function for weigh type select
         if (kTreeTraverseWeightType == (uint)TreeTraverseWeightType::DistanceIntensity)
         {
             if (depth < 5)
@@ -160,13 +157,11 @@ UniformGrid traverseTreeForGird<S : ISampleGenerator>(const ShadingData sd, floa
 }
 
 // ---------------- Octree Code ----------------- //
-// TODO: find a better place
 
 // BUG: If we use scene "AnimatedCubes", attribute "isLeaf" in root node will be true
 //      but every thing works fine in other scenes.
 StructuredBuffer<OctreeNode> gOctree;
 
-// TODO: better way to solve cbuffer name conflict
 cbuffer PerFrameOctreeCB
 {
 	uint octreeRootIndex;
@@ -178,7 +173,6 @@ void buildGridByOctreeNode(in OctreeNode octreeNode, out UniformGrid grid)
     grid.intensity = octreeNode.intensity;
     grid.range = octreeNode.triangleRange;
     grid.gridIndex = octreeNode.nodeIdx;
-    grid.isLeafNode = true;
 }
 
 /** Compute the near and far intersections of the cube (stored in the x and y components) using the slab method.

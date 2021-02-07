@@ -1,6 +1,6 @@
 #pragma once
 #include "Falcor.h"
-#include "BVHNodeData.slangh"
+#include "LightProxyData.slangh"
 #include "GridData.slangh"
 #include "UniformLightGridCommon.h"
 

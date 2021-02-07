@@ -4,10 +4,8 @@
 // FIXME: we need to use uint in c++, uint was declared in Falcor naming space
 BEGIN_NAMESPACE_FALCOR
 
-// TODO: merge two node types into BVHNode
 struct BVHInternalNode
 {
-    // TODO: bottom level internal node as leaf node
     bool isLChildLeaf = false;
     bool isRChildLeaf = false;
     uint commonPrefixLength = 0;
@@ -15,7 +13,7 @@ struct BVHInternalNode
     uint lChildId = 0;
     uint rChildId = 0;
     uint splitMortonCode = 0;
-    uint split = 0; // TODO: remove this
+    uint split = 0;
     uint2 range = uint2(0, 0);
     float3 intensity = float3(0, 0, 0);
 
@@ -34,20 +32,6 @@ struct BVHInternalNode
     [mutating] void setIsRChildLeaf(bool b) { isRChildLeaf = b; }
     [mutating] void setCommonPrefixLength(uint l) { commonPrefixLength = l; }
 #endif
-};
-
-struct LightProxy
-{
-    float3 pos = float3(0, 0, 0);
-    uint mortonCode = 0;
-    uint triangleIdx = 0;
-    float3 intensity = float3(0, 0, 0);
-    // fluxData in LightCollection
-    float3 averageRadiance = float3(0, 0, 0);
-    float flux = 0;
-
-    // above attributes use 9 * 4 bytes, add 3 * 4 bytes padding
-    float3 paddingAndDebug = float3(0, 0, 0);
 };
 
 END_NAMESPACE_FALCOR

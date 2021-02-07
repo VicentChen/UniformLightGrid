@@ -50,6 +50,12 @@
     <ShaderSource Include="GenLightProxys.cs.slang">
       <Filter>ULG</Filter>
     </ShaderSource>
+    <ShaderSource Include="VisualizeOctree.3d.slang">
+      <Filter>Utils</Filter>
+    </ShaderSource>
+    <ShaderSource Include="LightProxyData.slangh">
+      <Filter>ULGData</Filter>
+    </ShaderSource>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="PathTracers">

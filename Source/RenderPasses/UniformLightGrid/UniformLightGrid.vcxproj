@@ -45,6 +45,7 @@
     <ShaderSource Include="EmissiveULGSampler.slang" />
     <ShaderSource Include="GenLightProxys.cs.slang" />
     <ShaderSource Include="GridData.slangh" />
+    <ShaderSource Include="LightProxyData.slangh" />
     <ShaderSource Include="MortonCodeHelpers.slang" />
     <ShaderSource Include="Samplers.slang" />
     <ShaderSource Include="SelectGridAndLight.cs.slang" />
@@ -53,6 +54,7 @@
     <ShaderSource Include="ULGTracer.rt.slang" />
     <ShaderSource Include="ULGTracer.slang" />
     <ShaderSource Include="ULGTracerHelpers.slang" />
+    <ShaderSource Include="VisualizeOctree.3d.slang" />
   </ItemGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>

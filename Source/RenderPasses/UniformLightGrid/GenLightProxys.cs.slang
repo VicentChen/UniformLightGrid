@@ -1,3 +1,4 @@
+#include "LightProxyData.slangh"
 #include "BVHNodeData.slangh"
 import Scene.Scene;
 import Experimental.Scene.Lights.LightCollection;

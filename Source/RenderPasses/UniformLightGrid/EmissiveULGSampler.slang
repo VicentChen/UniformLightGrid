@@ -53,8 +53,6 @@ struct EmissiveULGSampler
     */
     bool sampleLight<S : ISampleGenerator>(const float3 posW, const float3 normalW, const uint triangleIndex, const float trianglePdf, const bool onSurface, inout S sg, out TriangleLightSample ls)
     {
-        // TODO: are we selecting active triangles?
-
         uint triangleCount = gScene.lightCollection.getTriangleCount();
         float triangleSelectionPdf = trianglePdf; // caller will provide pdf, original pdf = 1.f / (float)triangleCount;
 

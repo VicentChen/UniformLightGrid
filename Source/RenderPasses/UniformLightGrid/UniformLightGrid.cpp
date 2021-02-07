@@ -130,7 +130,6 @@ void UniformLightGrid::generateLightProxys(RenderContext* pRenderContext)
 {
     PROFILE("ULG_generateLightProxys");
 
-    // TODO: find a better place for program creation
     // Create leaf nodes generating program
     if (mpProxyGenerator == nullptr)
     {
@@ -140,7 +139,6 @@ void UniformLightGrid::generateLightProxys(RenderContext* pRenderContext)
         mpProxyGenerator = ComputePass::create(kGenLightProxysFile, "genLightProxys", leafGeneratorDefines);
     }
 
-    // TODO: reuse createAndCopyBuffer() code
     uint32_t emissiveTriangleCount = mpScene->getLightCollection(pRenderContext)->getTotalLightCount();
     if (!mpProxyBuffer || mpProxyBuffer->getElementCount() < emissiveTriangleCount)
     {
@@ -148,7 +146,6 @@ void UniformLightGrid::generateLightProxys(RenderContext* pRenderContext)
         mpProxyBuffer->setName("ULG::mpProxyBuffer");
     }
 
-    // TODO: do we have better way to get scene bound?
     auto sceneBound = sceneBoundHelper();
 
     mpProxyGenerator.getRootVar()["gScene"] = mpScene->getParameterBlock();
@@ -328,7 +325,6 @@ void UniformLightGrid::generateUniformGrids(RenderContext* pRenderContext)
         grid.range = uint2(beginIdx, endIdx);
         grid.gridIndex = (uint)mGrids.size();
         grid.mortonCode = bound;
-        grid.isLeafNode = false;
         grid.flux = flux;
 
         mGrids.emplace_back(grid);
@@ -353,7 +349,6 @@ void UniformLightGrid::chooseGridsAndLights(RenderContext* pRenderContext, const
 {
     PROFILE("ULG_chooseGridAndLight");
 
-    // TODO: find a better place for program creation
     // Create grid and light selector program
     if (mpGridAndLightSelector == nullptr || mGridAndLightSelectorParams.needToRegenerateSelector)
     {
@@ -370,8 +365,6 @@ void UniformLightGrid::chooseGridsAndLights(RenderContext* pRenderContext, const
     Texture::SharedPtr pLightIndexTexture = renderData[kLightIndexInternal]->asTexture();
     Texture::SharedPtr pAOMap = renderData[kAOInput]->asTexture();
 
-    // TODO: do we have better way to get scene bound?
-    // for grid selection, we need real scene bound and uniform scene bound here
     auto sceneBound = sceneBoundHelper();
 
     // Add missed channels here
@@ -431,7 +424,6 @@ RenderPassReflection UniformLightGrid::reflect(const CompileData& compileData)
     for (const auto& input : kInputChannels)
         reflector.addInput(input.name, input.desc);
 
-    // TODO: find a place to clear this texture
     reflector.addInternal(kLightIndexInternal, "Light index")
         .format(ResourceFormat::RGBA32Float)
         .bindFlags(ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);

@@ -108,7 +108,6 @@ void selectGridByBVH<S : ISampleGenerator>(const ShadingData sd, inout S sg, out
     float3 pos = sd.posW;
 
     // compute direction by bsdf
-    // TODO: randomly choose direction
     BSDFSample bsdfSample;
     sampleBSDF(sd, sg, bsdfSample);
     float3 dir = bsdfSample.wi;
@@ -117,7 +116,6 @@ void selectGridByBVH<S : ISampleGenerator>(const ShadingData sd, inout S sg, out
     chosenGridPdf = 1.0f;
 
     // multiple grid selection
-    // TODO: make as a struct?
     float3 chosenGridBSDF = 0;
     float chosenGridDistance = 0;
     float weightSum = 0;
@@ -385,7 +383,7 @@ void chooseTriangle<S : ISampleGenerator>(in uint2 range, in const ShadingData s
     float weightSum = 1e-10;
     float chosenPHat = 0;
     float3 pos = sd.posW;
-    for (int i = 0; i < RISCount; i++) // TODO:: make 4 a variable
+    for (int i = 0; i < RISCount; i++)
     {
         uint idx = 0;
         float idxPdf = 1.f;
@@ -459,9 +457,7 @@ void selectGridAndLight(uint3 dispatchThreadId : SV_DispatchThreadID)
         else // Use uniform sampling by default
             sampleRangeUniformly(chosenGrid.range, sg, proxyIdx, proxyPdf);
 
-        // TODO: add if for two triangle index?
         uint emissiveTriangleIndex = gProxys[proxyIdx].triangleIdx;
-        // uint emissiveTriangleIndex = gPowerNodes[proxyIdx].triangleIdx;
         float emissivePdf = chosenGridPdf * proxyPdf;
 
         result = float4(emissiveTriangleIndex, emissivePdf, debugValue.x, debugValue.y);
