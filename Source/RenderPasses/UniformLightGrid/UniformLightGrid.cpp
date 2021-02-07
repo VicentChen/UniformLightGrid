@@ -169,8 +169,7 @@ void UniformLightGrid::sortProxys(RenderContext* pRenderContext)
     uint32_t emissiveTriangleCount = mpScene->getLightCollection(pRenderContext)->getTotalLightCount();
     size_t bufferSize = sizeof(LightProxy) * emissiveTriangleCount;
 
-    if (mProxys.size() < emissiveTriangleCount)
-        mProxys.resize(emissiveTriangleCount);
+    mProxys.resize(emissiveTriangleCount);
     LightProxy* pProxys = (LightProxy*)mpProxyBuffer->map(Buffer::MapType::Read);
     memcpy(mProxys.data(), pProxys, bufferSize);
     mpProxyBuffer->unmap();
@@ -201,94 +200,7 @@ void UniformLightGrid::constructBVHTree(RenderContext* pRenderContext)
     mpBVHConstructor->execute(pRenderContext, internalNodeCount, 1, 1);
 }
 
-void UniformLightGrid::genPowerNode(RenderContext* pRenderContext)
-{
-    //std::vector<LightCollection::MeshLightTriangle> triangles = mpScene->getLightCollection(pRenderContext)->getMeshLightTriangles();
-
-    //mPowerNodes.clear();
-    //uint nodeSize = (uint)triangles.size();
-    //AABB sceneBound = sceneBoundHelper();
-    //for (uint i = 0; i < nodeSize; i++)
-    //{
-    //    BVHPowerNode node = {};
-    //    float3 triangleCenter = triangles[i].getCenter();
-    //    float3 normPos = (triangleCenter - sceneBound.minPoint) / sceneBound.extent();
-    //    uint3 quantPos = uint3(0, 0, 0);
-    //    quantPos.x = (uint)std::min(std::max(0.0f, normPos.x * (float)kQuantLevels), float(kQuantLevels) - 1.f);
-    //    quantPos.y = (uint)std::min(std::max(0.0f, normPos.y * (float)kQuantLevels), float(kQuantLevels) - 1.f);
-    //    quantPos.z = (uint)std::min(std::max(0.0f, normPos.z * (float)kQuantLevels), float(kQuantLevels) - 1.f);
-    //    uint mortonCode = interleave_uint3(quantPos);
-    //    float flux = triangles[i].flux;
-    //    node.mortonCode = mortonCode;
-    //    node.triangleIdx = i;
-    //    node.flux = flux;
-    //    mPowerNodes.emplace_back(node);
-    //}
-
-    //std::sort(mPowerNodes.begin(), mPowerNodes.end(), [](const BVHPowerNode& a, const BVHPowerNode& b) { return a.mortonCode < b.mortonCode; });
-    //for (uint i = 0; i < nodeSize; i++)
-    //{
-    //    // TODO: wrong intensity
-    //    mPowerNodes[i].intensity = mProxys[i].intensity;// triangles[i].averageRadiance;
-    //}
-    //if (!mpPowerGridDataBuffer || mpPowerGridDataBuffer->getElementCount() < mPowerNodes.size())
-    //{
-    //    mpPowerLeafNodesBuffer = Buffer::createStructured((uint)sizeof(BVHPowerNode), (uint)mPowerNodes.size(), Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false);
-    //    mpPowerLeafNodesBuffer->setName("ULG::mpPowerLeafNodeBuffer");
-    //}
-    //mpPowerLeafNodesBuffer->setBlob(&mPowerNodes[0], 0, sizeof(BVHPowerNode) * mPowerNodes.size());
-}
-
-void UniformLightGrid::genPowerGrid(RenderContext* pRenderContext)
-{
-    //assert(mLeafNodes.size() > 0);
-
-    //PROFILE("ULG_generatePowerGrid");
-
-    //AABB sceneBound = sceneBoundHelper();
-
-    //mPowerGrids.clear();
-    //std::vector<float> weight;
-    //// generate leaves
-    //for (size_t i = 0; i < mPowerNodes.size();)
-    //{
-    //    uint mask = ~(0xFFFFFFFF << (30 - mGridAndLightSelectorParams.gridMortonCodePrefixLength));
-    //    uint bound = mPowerNodes[i].mortonCode | mask;
-
-    //    float3 intensity = float3(0, 0, 0);
-    //    float flux = 0;
-
-    //    size_t beginIdx = i;
-    //    while (i < mPowerNodes.size() && mPowerNodes[i].mortonCode <= bound)
-    //    {
-    //        intensity += mPowerNodes[i].intensity;
-    //        flux += mPowerNodes[i].flux;
-    //        i++;
-    //    }
-    //    size_t endIdx = i - 1;
-
-    //    UniformGrid grid;
-    //    grid.pos = computePosByMortonCode(bound, mGridAndLightSelectorParams.gridMortonCodePrefixLength, kQuantLevels, sceneBound);
-    //    grid.mortonCode = bound;
-    //    grid.intensity = intensity;
-    //    grid.range = uint2(beginIdx, endIdx);
-    //    grid.flux = flux;
-
-    //    mPowerGrids.emplace_back(grid);
-    //    weight.emplace_back(flux);
-    //}
-
-    //mTriangleTable = genAliasTable(std::move(weight));
-    //
-    //if (!mpPowerGridDataBuffer || mpPowerGridDataBuffer->getElementCount() < mPowerGrids.size())
-    //{
-    //    mpPowerGridDataBuffer = Buffer::createStructured((uint)sizeof(UniformGrid), (uint)mPowerGrids.size(), Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false);
-    //    mpPowerGridDataBuffer->setName("ULG::mpPowerGridDataBuffer");
-    //}
-    //mpPowerGridDataBuffer->setBlob(&mPowerGrids[0], 0, sizeof(UniformGrid) * mPowerGrids.size());
-}
-
-UniformLightGrid::AliasTable UniformLightGrid::genAliasTable(std::vector<float> weights)
+UniformLightGrid::AliasTable UniformLightGrid::genGridFluxAliasTable(std::vector<float>& weights)
 {
     uint32_t N = uint32_t(weights.size());
     std::uniform_int_distribution<uint32_t> rngDist;
@@ -375,19 +287,20 @@ UniformLightGrid::AliasTable UniformLightGrid::genAliasTable(std::vector<float> 
         Buffer::createTyped<uint2>(N),
     };
 
-    result.fullTable->setBlob(&fullTable[0], 0, N * sizeof(uint2));
+    result.fullTable->setBlob(fullTable.data(), 0, N * sizeof(uint2));
+    result.fullTable->setName("ULG::LightPowerAliasTable");
 
     return result;
 }
 
 void UniformLightGrid::generateUniformGrids(RenderContext* pRenderContext)
 {
-    // TODO: visualize uniform grids
     assert(mProxys.size() > 0);
 
     PROFILE("ULG_generateUniformGrids");
 
     AABB sceneBound = sceneBoundHelper();
+    std::vector<float> fluxData;
 
     mGrids.clear();
     for (size_t i = 0; i < mProxys.size();)
@@ -396,14 +309,18 @@ void UniformLightGrid::generateUniformGrids(RenderContext* pRenderContext)
         uint bound = mProxys[i].mortonCode | mask;
 
         float3 intensity = float3(0, 0, 0);
+        float flux = 0.f;
 
         size_t beginIdx = i;
         while (i < mProxys.size() && mProxys[i].mortonCode <= bound)
         {
             intensity += mProxys[i].intensity;
+            flux += mProxys[i].flux;
             i++;
         }
         size_t endIdx = i - 1;
+
+        fluxData.emplace_back(flux);
 
         UniformGrid grid;
         grid.pos = computePosByMortonCode(bound, mGridAndLightSelectorParams.gridMortonCodePrefixLength, kQuantLevels, sceneBound);
@@ -412,10 +329,12 @@ void UniformLightGrid::generateUniformGrids(RenderContext* pRenderContext)
         grid.gridIndex = (uint)mGrids.size();
         grid.mortonCode = bound;
         grid.isLeafNode = false;
+        grid.flux = flux;
 
         mGrids.emplace_back(grid);
     }
 
+    mTriangleTable = genGridFluxAliasTable(fluxData);
     createAndCopyBuffer(mpGridDataBuffer, sizeof(UniformGrid), (uint)mGrids.size(), mGrids.data(), "ULG::mpGridDataBuffer");
 }
 
@@ -477,16 +396,12 @@ void UniformLightGrid::chooseGridsAndLights(RenderContext* pRenderContext, const
     mpGridAndLightSelector.getRootVar()["gOctree"] = mOctree.getGpuBufferPtr();
     mpGridAndLightSelector.getRootVar()["PerFrameOctreeCB"]["octreeRootIndex"] = mOctree.getRootIndex();
 
-    // power sampler
-    mpGridAndLightSelector.getRootVar()["gPowerGrids"] = mpPowerGridDataBuffer;
-
     auto var = mpGridAndLightSelector.getRootVar()["PerFrameCB"];
     var["dispatchDim"] = mSharedParams.frameDim;
     var["frameCount"] = mSharedParams.frameCount;
     var["RISSampleCount"] = mGridAndLightSelectorParams.RISSampleCount;
 
     // power sampler
-    var["powerGridCount"] = mPowerGrids.size();
     var["emissivePower"]["invWeightsSum"] = 1.0f / mTriangleTable.weightSum;
     var["emissivePower"]["triangleAliasTable"] = mTriangleTable.fullTable;
 
@@ -531,13 +446,10 @@ void UniformLightGrid::execute(RenderContext* pRenderContext, const RenderData& 
 
     // ----- Uniform Light Grid Codes ----- //
     generateLightProxys(pRenderContext);
-    sortProxys(pRenderContext);
+    sortProxys(pRenderContext);   
     generateUniformGrids(pRenderContext);
     generateOctree(pRenderContext);
     constructBVHTree(pRenderContext);
-
-    //genPowerNode(pRenderContext);
-    //genPowerGrid(pRenderContext);
 
     chooseGridsAndLights(pRenderContext, renderData);
 
@@ -624,6 +536,7 @@ void UniformLightGrid::renderUI(Gui::Widgets& widget)
             list.push_back({ (uint)GridSelectionStrategy::OctreeWithResampling, "OctreeWithResampling" });
             list.push_back({ (uint)GridSelectionStrategy::BVH, "BVH" });
             list.push_back({ (uint)GridSelectionStrategy::Resampling, "Resampling" });
+            list.push_back({ (uint)GridSelectionStrategy::ResamplingByPower, "ResamplingByPower" });
             list.push_back({ (uint)GridSelectionStrategy::BruteForceResampling, "BruteForceResampling" });
             list.push_back({ (uint)GridSelectionStrategy::KNNWithFixedRadius, "KNNWithFixedRadius" });
             list.push_back({ (uint)GridSelectionStrategy::KNNWithFixedK, "KNNWithFixedK" });

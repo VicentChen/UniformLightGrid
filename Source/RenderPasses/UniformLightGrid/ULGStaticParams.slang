@@ -14,10 +14,11 @@ enum class GridSelectionStrategy
     OctreeWithResampling        = 2, // >>> Still cannot generate correct for ceiling in cornell box.
     BVH                         = 3, // >>> This cannot build balanced tree.
     Resampling                  = 4, // >>> This cannot sample nearing lights.
-    BruteForceResampling        = 5, 
-    KNNWithFixedRadius          = 6, // >>> This will lead to blocking.
-    KNNWithFixedK               = 7, // >>> This can only choose nearing lights.
-    Debug                       = 8, // >>> For debug usage.
+    ResamplingByPower           = 5,
+    BruteForceResampling        = 6, 
+    KNNWithFixedRadius          = 7, // >>> This will lead to blocking.
+    KNNWithFixedK               = 8, // >>> This can only choose nearing lights.
+    Debug                       = 9, // >>> For debug usage.
 };
 
 enum class TriangleSelectionStrategy

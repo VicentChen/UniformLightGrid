@@ -74,11 +74,8 @@ private:
     void sortProxys(RenderContext* pRenderContext);
     void constructBVHTree(RenderContext* pRenderContext);
 
-    void genPowerNode(RenderContext* pRenderContext);
-    void genPowerGrid(RenderContext* pRenderContext);
-    AliasTable genAliasTable(std::vector<float> wieght);
-
     void generateUniformGrids(RenderContext* pRenderContext);
+    AliasTable genGridFluxAliasTable(std::vector<float>& weight);
     void generateOctree(RenderContext* pRenderContext);
 
     void chooseGridsAndLights(RenderContext* pRenderContext, const RenderData& renderData);
@@ -118,16 +115,11 @@ private:
     // uniform grid data
     std::vector<UniformGrid> mGrids;
     Buffer::SharedPtr mpGridDataBuffer;
+    std::mt19937 mAliasTableRng;
+    AliasTable mTriangleTable;
 
     // octree data
     Octree mOctree;
-
-    // power sampler
-    std::vector<UniformGrid> mPowerGrids;
-    Buffer::SharedPtr mpPowerGridDataBuffer;
-
-    std::mt19937 mAliasTableRng;
-    AliasTable mTriangleTable;
 
     // grid and light selection data
     struct

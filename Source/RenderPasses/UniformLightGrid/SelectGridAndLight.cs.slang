@@ -22,7 +22,6 @@ cbuffer PerFrameCB
     uint RISSampleCount;
 
     uint gridCount; // TODO: better position?
-    uint powerGridCount;
 
     EmissivePower emissivePower;
 }
@@ -31,7 +30,6 @@ Texture2D<float4> gAOMap;
 
 // float4: triangleIndex, pdf, ??, ??
 RWTexture2D<float4> gLightIndex;
-StructuredBuffer<UniformGrid> gPowerGrids;
 
 float computeOctreeNodeWeightForResampling(const OctreeNode node, const ShadingData sd)
 {
@@ -335,29 +333,33 @@ void selectGridByKNNWithFixedK<S : ISampleGenerator>(const ShadingData sd, inout
     chosenGridPdf = chosenNodeWeight / weightSum;
 }
 
-void selectGridByPowerResampling<S : ISampleGenerator>(const ShadingData sd, inout S sg, out UniformGrid chosenGrid, out float chosenGridPdf)
+void selectGridByPowerResampling<S : ISampleGenerator>(const ShadingData sd, inout S sg, out UniformGrid chosenGrid, out float chosenGridPdf, out float4 debugValue)
 {
+    // initialize return values
+    chosenGrid = {};
+    chosenGridPdf = 1.f;
+
     float3 pos = sd.posW;
-    float gridPdf = 1.f;
 
     float weightSum = 0.0001f;
     float3 chosenGridBSDF = 0;
     float  chosenGridDistance = 0;
-    uint   chosenGridIdx = 0;
     for (int i = 0; i < RISSampleCount; i++)
     {
-        uint gridIdx = uint(floor(sampleNext1D(sg) * 0.999999f * gridCount));
+        uint gridIdx; float dummy;
+        sampleRangeUniformly(uint2(0, gridCount-1), sg, gridIdx, dummy);
+
         uint2 packed = emissivePower.triangleAliasTable[gridIdx];
         float threshold = f16tof32(packed.x >> 16u);
         uint  selectAbove = ((packed.x & 0xFFFFu) << 8u) | ((packed.y >> 24u) & 0xFFu);
         uint  selectBelow = packed.y & 0xFFFFFFu;
         gridIdx = (sampleNext1D(sg) >= threshold) ? selectAbove : selectBelow;
 
-        UniformGrid grid = gPowerGrids[gridIdx];
+        UniformGrid grid = gGrids[gridIdx];
         float3 dir = normalize(grid.pos - pos);
         float distance = length(grid.pos - pos);
-        float3 bsdf = evalBSDFCosine(sd, dir);
-        gridPdf = grid.flux * emissivePower.invWeightsSum;
+        float3 bsdf = float3(1,1,1);// evalBSDFCosine(sd, dir);
+        float gridPdf = grid.flux * emissivePower.invWeightsSum;
 
         float gridWeight = length(bsdf * grid.intensity) / (distance * distance) / gridPdf;
         weightSum += gridWeight;
@@ -435,7 +437,8 @@ void selectGridAndLight(uint3 dispatchThreadId : SV_DispatchThreadID)
             selectGridByBVH(sd, sg, chosenGrid, chosenGridPdf, debugValue);
         else if (kGridSelectionStrategy == (uint)GridSelectionStrategy::Resampling)
             selectGridByResampling(sd, sg, chosenGrid, chosenGridPdf, debugValue);
-            // selectGridByPowerResampling(sd, sg, chosenGrid, chosenGridPdf);
+        else if (kGridSelectionStrategy == (uint)GridSelectionStrategy::ResamplingByPower)
+            selectGridByPowerResampling(sd, sg, chosenGrid, chosenGridPdf, debugValue);
         else if (kGridSelectionStrategy == (uint)GridSelectionStrategy::BruteForceResampling)
             selectGridByBruteForceResampling(sd, sg, chosenGrid, chosenGridPdf, debugValue);
         else if (kGridSelectionStrategy == (uint)GridSelectionStrategy::KNNWithFixedRadius)
